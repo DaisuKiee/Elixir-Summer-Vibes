@@ -1,0 +1,42 @@
+{
+  "name": "elixir-summer-escape",
+  "version": "3.0.0",
+  "description": "Elixir: Summer Escape 2026 - A limited-time summer event Discord bot with battle pass, fishing, beach exploration, and more!",
+  "main": "sharder.js",
+  "type": "module",
+  "scripts": {
+    "start": "node sharder.js",
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "dev": "nodemon sharder.js"
+  },
+  "repository": {
+    "type": "git",
+    "url": ""
+  },
+  "keywords": [
+    "discord",
+    "bot",
+    "discord-bot",
+    "discord.js",
+    "discord.js-v14",
+    "summer",
+    "event",
+    "battle-pass",
+    "seasonal"
+  ],
+  "author": "",
+  "license": "GPL",
+  "bugs": "",
+  "homepage": "",
+  "dependencies": {
+    "canvas": "^2.11.2",
+    "discord.js": "^14.26.4",
+    "dotenv": "^17.0.0",
+    "mongoose": "^8.10.0",
+    "signale": "^1.4.0",
+    "uuid": "^14.0.1"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
