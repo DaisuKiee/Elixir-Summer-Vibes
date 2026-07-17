@@ -189,8 +189,8 @@ We use MongoDB for data storage. Review [MongoDB's Privacy Policy](https://www.m
 **Questions, concerns, or data requests:**
 
 📧 **Email**: daisukiedev@gmail.com 
-💬 **Discord Support Server**: [\[Your invite link\]](https://discord.gg/Fn8juAT5gR)  
-📝 **GitHub Issues**: [\[Your GitHub repo if public\]](https://github.com/DaisuKiee/Elixir-Summer-Vibes)
+💬 **Discord Support Server**: [Aurora Support](https://discord.gg/Fn8juAT5gR)  
+📝 **GitHub Issues**: [github repo](https://github.com/DaisuKiee/Elixir-Summer-Vibes)
 
 **Response Time**: We aim to respond within 7 business days.
 
