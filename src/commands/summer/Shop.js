@@ -1,4 +1,4 @@
-import { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } from 'discord.js';
+import { ActionRowBuilder, ButtonBuilder, ButtonStyle } from 'discord.js';
 import Command from '../../structures/Command.js';
 import SummerProfile from '../../schemas/summerProfile.js';
 import emojis from '../../config/emojis.js';
@@ -20,7 +20,7 @@ export default class Shop extends Command {
     async run(ctx, args) {
         const profile = await SummerProfile.findById(ctx.author.id);
         if (!profile) {
-            return ctx.sendMessage(`${emojis.general.error} You don't have a summer profile! Use \`!fish\` to start.`);
+            return ctx.sendMessage(`${emojis.general.error} You don't have a summer profile! Use \`${this.client.config.prefix}fish\` to start.`);
         }
 
         // Initialize energy items if needed
@@ -43,76 +43,63 @@ export default class Shop extends Command {
     }
 
     async showEnergyShop(ctx, profile) {
-        const embed = new EmbedBuilder()
-            .setColor('#f39c12')
-            .setAuthor({ 
-                name: `${ctx.author.username}'s Shop`, 
-                iconURL: ctx.author.displayAvatarURL() 
-            })
-            .setTitle(`${emojis.currency.seashell} Energy Item Shop`)
-            .setDescription(
-                `**Welcome to the shop!** Purchase energy restoration items with seashells.\n\n` +
-                `${emojis.currency.treasure} **Your Balance:** ${emojis.currency.seashell} **${profile.seashells.toLocaleString()}** seashells\n\n` +
-                `💡 **How to get seashells:**\n` +
-                `• Catch fish with \`!fish\`\n` +
-                `• Sell fish with \`!sell\`\n` +
-                `• Complete daily challenges\n\n` +
-                `⚡ **Need energy now?** Use items with \`!energy restore <item>\``
+        const container = this.client.container()
+            .setAccentColor(parseInt(this.client.color.default.replace('#', ''), 16));
+        
+        // Header
+        container.addTextDisplayComponents(
+            (textDisplay) => textDisplay.setContent(
+                `## ${emojis.currency.seashell} **Energy Item Shop**\n` +
+                `**Welcome, ${ctx.author.username}!**`
             )
-            .addFields(
-                {
-                    name: '🍪 Small Snack',
-                    value: 
-                        `**Restores:** +10 energy\n` +
-                        `**Price:** ${emojis.currency.seashell} 500 seashells\n` +
-                        `**Best for:** Quick energy boost`,
-                    inline: true
-                },
-                {
-                    name: '🥤 Energy Drink',
-                    value: 
-                        `**Restores:** +15 energy\n` +
-                        `**Price:** ${emojis.currency.seashell} 1,000 seashells\n` +
-                        `**Best for:** One more action`,
-                    inline: true
-                },
-                {
-                    name: '🍱 Meal',
-                    value: 
-                        `**Restores:** +25 energy\n` +
-                        `**Price:** ${emojis.currency.seashell} 2,000 seashells\n` +
-                        `**Best for:** Extended session`,
-                    inline: true
-                },
-                {
-                    name: '🍗 Feast',
-                    value: 
-                        `**Restores:** +50 energy\n` +
-                        `**Price:** ${emojis.currency.seashell} 5,000 seashells\n` +
-                        `**Best for:** Long play session`,
-                    inline: true
-                },
-                {
-                    name: '✨ Full Restore',
-                    value: 
-                        `**Restores:** +100 energy (FULL!)\n` +
-                        `**Price:** ${emojis.currency.seashell} 15,000 seashells\n` +
-                        `**Best for:** Emergency`,
-                    inline: true
-                },
-                {
-                    name: '\u200b',
-                    value: '\u200b',
-                    inline: true
-                }
-            );
+        );
+        
+        container.addSeparatorComponents((separator) => separator.setDivider(true));
+        
+        // Balance, info, and items all in one component
+        container.addTextDisplayComponents(
+            (textDisplay) => textDisplay.setContent(
+                `${emojis.currency.treasure} **Your Balance**\n` +
+                `${emojis.currency.seashell} **${profile.seashells.toLocaleString()}** seashells\n` +
+                `\n` +
+                `**💡 How to get seashells:**\n` +
+                `• Catch fish with \`${this.client.config.prefix}fish\`\n` +
+                `• Sell fish with \`${this.client.config.prefix}sell\`\n` +
+                `• Complete daily challenges\n` 
+            )
+        );
 
-        // Show current inventory
+                container.addSeparatorComponents((separator) => separator.setDivider(true));
+
+                 container.addTextDisplayComponents(
+            (textDisplay) => textDisplay.setContent(
+                `**🛒 Available Items**\n` +
+                `\n` +
+                `🍪 **Small Snack** - ${emojis.currency.seashell} 400\n` +
+                `_Restores +10 energy • Quick boost_\n` +
+                `\n` +
+                `🥤 **Energy Drink** - ${emojis.currency.seashell} 900\n` +
+                `_Restores +20 energy • One more action_\n` +
+                `\n` +
+                `🍱 **Meal** - ${emojis.currency.seashell} 1,800\n` +
+                `_Restores +35 energy • Extended session_\n` +
+                `\n` +
+                `🍗 **Feast** - ${emojis.currency.seashell} 4,500\n` +
+                `_Restores +60 energy • Long play session_\n` +
+                `\n` +
+                `✨ **Full Restore** - ${emojis.currency.seashell} 12,000\n` +
+                `_Restores +100 energy • FULL!_`
+            )
+        );
+        
+        // Show current inventory if player has items
         const items = profile.energyItems || {};
         const hasItems = Object.values(items).some(count => count > 0);
         
         if (hasItems) {
-            let inventoryText = '';
+            container.addSeparatorComponents((separator) => separator.setDivider(true));
+            
+            let inventoryText = '**🎒 Your Energy Items**\n';
             const itemEmojis = {
                 smallSnack: '🍪',
                 meal: '🍱',
@@ -120,41 +107,54 @@ export default class Shop extends Command {
                 energyDrink: '🥤',
                 fullRestore: '✨'
             };
+            
+            const itemNames = {
+                smallSnack: 'Small Snack',
+                meal: 'Meal',
+                feast: 'Feast',
+                energyDrink: 'Energy Drink',
+                fullRestore: 'Full Restore'
+            };
 
+            let itemList = [];
             Object.entries(items).forEach(([item, count]) => {
                 if (count > 0) {
-                    const emoji = itemEmojis[item];
-                    inventoryText += `${emoji} x${count}  `;
+                    itemList.push(`${itemEmojis[item]} ${itemNames[item]} x${count}`);
                 }
             });
-
-            if (inventoryText) {
-                embed.addFields({
-                    name: '🎒 Your Energy Items',
-                    value: inventoryText.trim() || 'None',
-                    inline: false
-                });
-            }
+            
+            inventoryText += itemList.join(' • ');
+            
+            container.addTextDisplayComponents(
+                (textDisplay) => textDisplay.setContent(inventoryText)
+            );
         }
-
-        embed.setFooter({ text: '💡 Click buttons below to purchase items!' })
-            .setTimestamp();
+        
+        container.addSeparatorComponents((separator) => separator.setDivider(true));
+        
+        // Footer
+        container.addTextDisplayComponents(
+            (textDisplay) => textDisplay.setContent(
+                `_💡 Click buttons below to purchase items!_\n` +
+                `_⚡ Use items with \`${this.client.config.prefix}energy restore <item>\`_`
+            )
+        );
 
         // Create purchase buttons
         const row1 = new ActionRowBuilder().addComponents(
             new ButtonBuilder()
                 .setCustomId('buy_smallSnack')
-                .setLabel('Small Snack (500)')
+                .setLabel('Small Snack (400)')
                 .setEmoji('🍪')
                 .setStyle(ButtonStyle.Secondary),
             new ButtonBuilder()
                 .setCustomId('buy_energyDrink')
-                .setLabel('Energy Drink (1k)')
+                .setLabel('Energy Drink (900)')
                 .setEmoji('🥤')
                 .setStyle(ButtonStyle.Secondary),
             new ButtonBuilder()
                 .setCustomId('buy_meal')
-                .setLabel('Meal (2k)')
+                .setLabel('Meal (1.8k)')
                 .setEmoji('🍱')
                 .setStyle(ButtonStyle.Primary)
         );
@@ -162,17 +162,17 @@ export default class Shop extends Command {
         const row2 = new ActionRowBuilder().addComponents(
             new ButtonBuilder()
                 .setCustomId('buy_feast')
-                .setLabel('Feast (5k)')
+                .setLabel('Feast (4.5k)')
                 .setEmoji('🍗')
                 .setStyle(ButtonStyle.Success),
             new ButtonBuilder()
                 .setCustomId('buy_fullRestore')
-                .setLabel('Full Restore (15k)')
+                .setLabel('Full Restore (12k)')
                 .setEmoji('✨')
                 .setStyle(ButtonStyle.Success)
         );
 
-        const reply = await ctx.sendMessage({ embeds: [embed], components: [row1, row2] });
+        const reply = await ctx.sendMessage({ components: [container, row1, row2] });
 
         // Handle button interactions
         const collector = reply.createMessageComponentCollector({
@@ -182,11 +182,11 @@ export default class Shop extends Command {
 
         collector.on('collect', async interaction => {
             const itemPrices = {
-                smallSnack: 500,
-                energyDrink: 1000,
-                meal: 2000,
-                feast: 5000,
-                fullRestore: 15000
+                smallSnack: 400,
+                energyDrink: 900,
+                meal: 1800,
+                feast: 4500,
+                fullRestore: 12000
             };
 
             const itemNames = {
@@ -251,47 +251,86 @@ export default class Shop extends Command {
                     `${emojis.currency.seashell} Paid **${price.toLocaleString()}** seashells\n` +
                     `${emojis.currency.treasure} Balance: **${updatedProfile.seashells.toLocaleString()}** seashells\n` +
                     `📦 **${itemNames[item]}** owned: **${updatedProfile.energyItems[item]}**\n\n` +
-                    `💡 Use with \`!energy restore ${item}\``,
+                    `💡 Use with \`${this.client.config.prefix}energy restore ${item}\``,
                 ephemeral: true
             });
 
-            // Update the embed to show new balance
-            const updatedEmbed = EmbedBuilder.from(embed)
-                .setDescription(
-                    `**Welcome to the shop!** Purchase energy restoration items with seashells.\n\n` +
-                    `${emojis.currency.treasure} **Your Balance:** ${emojis.currency.seashell} **${updatedProfile.seashells.toLocaleString()}** seashells\n\n` +
-                    `💡 **How to get seashells:**\n` +
-                    `• Catch fish with \`!fish\`\n` +
-                    `• Sell fish with \`!sell\`\n` +
-                    `• Complete daily challenges\n\n` +
-                    `⚡ **Need energy now?** Use items with \`!energy restore <item>\``
-                );
-
+            // Update the container to show new balance
+            const updatedContainer = this.client.container()
+                .setAccentColor(parseInt(this.client.color.default.replace('#', ''), 16));
+            
+            // Header
+            updatedContainer.addTextDisplayComponents(
+                (textDisplay) => textDisplay.setContent(
+                    `## ${emojis.currency.seashell} **Energy Item Shop**\n` +
+                    `**Welcome, ${ctx.author.username}!**`
+                )
+            );
+            
+            updatedContainer.addSeparatorComponents((separator) => separator.setDivider(true));
+            
+            // Balance, info, and items all in one component
+            updatedContainer.addTextDisplayComponents(
+                (textDisplay) => textDisplay.setContent(
+                    `${emojis.currency.treasure} **Your Balance**\n` +
+                    `${emojis.currency.seashell} **${updatedProfile.seashells.toLocaleString()}** seashells\n` +
+                    `\n` +
+                    `**💡 How to get seashells:**\n` +
+                    `• Catch fish with \`${this.client.config.prefix}fish\`\n` +
+                    `• Sell fish with \`${this.client.config.prefix}sell\`\n` +
+                    `• Complete daily challenges\n` +
+                    `\n` +
+                    `**🛒 Available Items**\n` +
+                    `\n` +
+                    `🍪 **Small Snack** - ${emojis.currency.seashell} 400\n` +
+                    `_Restores +10 energy • Quick boost_\n` +
+                    `\n` +
+                    `🥤 **Energy Drink** - ${emojis.currency.seashell} 900\n` +
+                    `_Restores +20 energy • One more action_\n` +
+                    `\n` +
+                    `🍱 **Meal** - ${emojis.currency.seashell} 1,800\n` +
+                    `_Restores +35 energy • Extended session_\n` +
+                    `\n` +
+                    `🍗 **Feast** - ${emojis.currency.seashell} 4,500\n` +
+                    `_Restores +60 energy • Long play session_\n` +
+                    `\n` +
+                    `✨ **Full Restore** - ${emojis.currency.seashell} 12,000\n` +
+                    `_Restores +100 energy • FULL!_`
+                )
+            );
+            
+            updatedContainer.addSeparatorComponents((separator) => separator.setDivider(true));
+            
             // Update inventory display
-            let inventoryText = '';
+            let inventoryText = '**🎒 Your Energy Items**\n';
+            let itemList = [];
             Object.entries(updatedProfile.energyItems).forEach(([itemKey, count]) => {
                 if (count > 0) {
                     const emoji = itemEmojis[itemKey];
-                    inventoryText += `${emoji} x${count}  `;
+                    const name = itemNames[itemKey];
+                    itemList.push(`${emoji} ${name} x${count}`);
                 }
             });
-
-            if (inventoryText) {
-                const fields = updatedEmbed.data.fields;
-                const inventoryFieldIndex = fields.findIndex(f => f.name === '🎒 Your Energy Items');
-                
-                if (inventoryFieldIndex >= 0) {
-                    fields[inventoryFieldIndex].value = inventoryText.trim();
-                } else {
-                    updatedEmbed.addFields({
-                        name: '🎒 Your Energy Items',
-                        value: inventoryText.trim(),
-                        inline: false
-                    });
-                }
+            
+            if (itemList.length > 0) {
+                updatedContainer.addSeparatorComponents((separator) => separator.setDivider(true));
+                inventoryText += itemList.join(' • ');
+                updatedContainer.addTextDisplayComponents(
+                    (textDisplay) => textDisplay.setContent(inventoryText)
+                );
             }
+            
+            updatedContainer.addSeparatorComponents((separator) => separator.setDivider(true));
+            
+            // Footer
+            updatedContainer.addTextDisplayComponents(
+                (textDisplay) => textDisplay.setContent(
+                    `_💡 Click buttons below to purchase items!_\n` +
+                    `_⚡ Use items with \`${this.client.config.prefix}energy restore <item>\`_`
+                )
+            );
 
-            await reply.edit({ embeds: [updatedEmbed] }).catch(() => {});
+            await reply.edit({ components: [updatedContainer, row1, row2] }).catch(() => {});
         });
 
         collector.on('end', () => {

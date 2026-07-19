@@ -116,7 +116,7 @@ export default class Islands extends Command {
             `> ${emojis.islandGroups.visayas} **Visayas** - \`${groupStats.visayas.visited}/${groupStats.visayas.total}\` (${visayasPercent}%)\n` +
             `> ${emojis.islandGroups.mindanao} **Mindanao** - \`${groupStats.mindanao.visited}/${groupStats.mindanao.total}\` (${mindanaoPercent}%)\n` +
             `>\n` +
-            `> _Use \`++islands [group]\` to view specific islands_`;
+            `> _Use \`${this.client.config.prefix}islands [group]\` to view specific islands_`;
         
         container.addTextDisplayComponents((textDisplay) => textDisplay.setContent(groupText));
         
@@ -165,7 +165,7 @@ export default class Islands extends Command {
         // Footer
         container.addSeparatorComponents((separator) => separator.setDivider(true));
         container.addTextDisplayComponents(
-            (textDisplay) => textDisplay.setContent(`_${emojis.energy.lightbulb} Use \`++explore [island]\` to visit islands! Explore all 54 Philippine islands to become a legendary explorer!_`)
+            (textDisplay) => textDisplay.setContent(`_${emojis.energy.lightbulb} Use \`${this.client.config.prefix}explore [island]\` to visit islands! Explore all 54 Philippine islands to become a legendary explorer!_`)
         );
         
         return ctx.sendMessage({ components: [container] });
@@ -224,7 +224,7 @@ export default class Islands extends Command {
         // Footer
         container.addSeparatorComponents((separator) => separator.setDivider(true));
         container.addTextDisplayComponents(
-            (textDisplay) => textDisplay.setContent('_Use `++explore [island name]` to visit any unlocked island!_')
+            (textDisplay) => textDisplay.setContent(`_Use \`${this.client.config.prefix}explore [island name]\` to visit any unlocked island!_`)
         );
         
         return ctx.sendMessage({ components: [container] });

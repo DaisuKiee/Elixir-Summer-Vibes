@@ -1,4 +1,5 @@
 import Event from '../../structures/Event.js';
+import WeatherManager from '../../utils/weatherManager.js';
 
 export default class ClientReady extends Event {
     constructor(...args) {
@@ -20,5 +21,10 @@ export default class ClientReady extends Event {
             ],
             status: 'online',
         });
+        
+        // Initialize Weather Manager
+        this.client.weatherManager = new WeatherManager(this.client);
+        await this.client.weatherManager.initialize();
+        this.client.logger.ready('Mutation Weather System initialized');
     }
 }

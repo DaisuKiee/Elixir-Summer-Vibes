@@ -1,4 +1,4 @@
-import { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } from 'discord.js';
+import { ActionRowBuilder, ButtonBuilder, ButtonStyle } from 'discord.js';
 import Command from '../../structures/Command.js';
 import SummerProfile from '../../schemas/summerProfile.js';
 import { calculateCurrentEnergy, formatEnergyDisplay, getTimeUntilFull, getEnergyRecommendations, energyConfig, restoreEnergy, updateEnergy } from '../../data/energySystem.js';
@@ -68,50 +68,60 @@ export default class Energy extends Command {
         const energyDisplay = formatEnergyDisplay(profile);
         const timeInfo = getTimeUntilFull(profile);
 
-        const embed = new EmbedBuilder()
-            .setColor('#3498db')
-            .setAuthor({ name: `${ctx.author.username}'s Energy`, iconURL: ctx.author.displayAvatarURL() })
-            .setTitle(`⚡ Energy Status`)
-            .setDescription(
+        const container = this.client.container()
+            .setAccentColor(parseInt(this.client.color.default.replace('#', ''), 16));
+        
+        // Header
+        container.addTextDisplayComponents(
+            (textDisplay) => textDisplay.setContent(
+                `## ⚡ **Energy Status**\n` +
+                `**${ctx.author.username}**`
+            )
+        );
+        
+        container.addSeparatorComponents((separator) => separator.setDivider(true));
+        
+        // Energy bar and status
+        const energyPercent = Math.floor((currentEnergy / energyConfig.maxEnergy) * 100);
+        container.addTextDisplayComponents(
+            (textDisplay) => textDisplay.setContent(
                 `${energyDisplay.bar}\n` +
-                `${energyDisplay.text}\n\n` +
+                `${energyDisplay.text}\n` +
+                `\n` +
                 `**Regeneration:** +1 energy per hour\n` +
                 `**Last update:** <t:${Math.floor(new Date(profile.lastEnergyUpdate).getTime() / 1000)}:R>`
-            );
+            )
+        );
+        
+        container.addSeparatorComponents((separator) => separator.setDivider(true));
 
-        // Time until full
+        // Time until full and available actions
+        let statusText = '';
         if (!timeInfo.isFull) {
-            embed.addFields({
-                name: '🔄 Time Until Full',
-                value: `\`${timeInfo.hours}h ${timeInfo.minutes}m\``,
-                inline: true
-            });
+            statusText += `**🔄 Time Until Full**\n\`${timeInfo.hours}h ${timeInfo.minutes}m\`\n\n`;
         } else {
-            embed.addFields({
-                name: '✅ Status',
-                value: 'Energy is full!',
-                inline: true
-            });
+            statusText += `**✅ Status:** Energy is full!\n\n`;
         }
 
-        // What you can do
         const fishingCount = Math.floor(currentEnergy / energyConfig.costs.fishing);
         const exploringCount = Math.floor(currentEnergy / energyConfig.costs.exploring);
         
-        embed.addFields({
-            name: '🎮 Available Actions',
-            value: 
-                `🎣 Fish **${fishingCount}** times (-15 energy)\n` +
-                `🏝️ Explore **${exploringCount}** times (-20 energy)`,
-            inline: true
-        });
+        statusText += `**🎮 Available Actions**\n`;
+        statusText += `🎣 Fish **${fishingCount}** times (${energyConfig.costs.fishing} energy each)\n`;
+        statusText += `🏝️ Explore **${exploringCount}** times (${energyConfig.costs.exploring} energy each)`;
+        
+        container.addTextDisplayComponents(
+            (textDisplay) => textDisplay.setContent(statusText)
+        );
 
         // Energy items inventory
         const items = profile.energyItems || {};
         const hasItems = Object.values(items).some(count => count > 0);
         
         if (hasItems) {
-            let itemsList = '';
+            container.addSeparatorComponents((separator) => separator.setDivider(true));
+            
+            let itemsList = '**🎒 Energy Items**\n';
             const itemEmojis = {
                 smallSnack: '🍪',
                 meal: '🍱',
@@ -119,34 +129,60 @@ export default class Energy extends Command {
                 energyDrink: '🥤',
                 fullRestore: '✨'
             };
+            
+            const itemNames = {
+                smallSnack: 'Small Snack',
+                meal: 'Meal',
+                feast: 'Feast',
+                energyDrink: 'Energy Drink',
+                fullRestore: 'Full Restore'
+            };
 
             Object.entries(items).forEach(([item, count]) => {
                 if (count > 0) {
                     const emoji = itemEmojis[item] || '📦';
-                    const restoreAmount = energyConfig.restoration[item];
-                    const itemName = item.replace(/([A-Z])/g, ' $1').trim();
-                    itemsList += `${emoji} **${itemName.charAt(0).toUpperCase() + itemName.slice(1)}** x${count} (+${restoreAmount} energy)\n`;
+                    const restoreAmount = energyConfig.restoration[item].energy;
+                    itemsList += `${emoji} **${itemNames[item]}** x${count} (+${restoreAmount} energy)\n`;
                 }
             });
 
-            embed.addFields({
-                name: '🎒 Energy Items',
-                value: itemsList || 'No items',
-                inline: false
-            });
-
-            embed.setFooter({ text: '💡 Use "!energy restore <item>" to restore energy' });
+            container.addTextDisplayComponents(
+                (textDisplay) => textDisplay.setContent(itemsList)
+            );
+            
+            container.addSeparatorComponents((separator) => separator.setDivider(true));
+            container.addTextDisplayComponents(
+                (textDisplay) => textDisplay.setContent(`_💡 Use \`${this.client.config.prefix}energy restore <item>\` to restore energy_`)
+            );
         } else {
-            embed.setFooter({ text: '💡 Use "!shop" to buy energy items with seashells' });
+            container.addSeparatorComponents((separator) => separator.setDivider(true));
+            container.addTextDisplayComponents(
+                (textDisplay) => textDisplay.setContent(`_💡 Use \`${this.client.config.prefix}shop\` to buy energy items with seashells_`)
+            );
         }
 
-        embed.setTimestamp();
-        return ctx.sendMessage({ embeds: [embed] });
+        return ctx.sendMessage({ components: [container] });
     }
 
     async restoreEnergy(ctx, profile, itemName) {
         if (!itemName) {
-            return ctx.sendMessage(`${emojis.general.error} Please specify an item to use! Example: \`!energy restore meal\``);
+            const container = this.client.container()
+                .setAccentColor(parseInt(this.client.color.error.replace('#', ''), 16));
+            container.addTextDisplayComponents(
+                (textDisplay) => textDisplay.setContent(
+                    `**${emojis.general.error} Missing Item**\n` +
+                    `\n` +
+                    `**Usage:** \`${this.client.config.prefix}energy restore <item>\`\n` +
+                    `\n` +
+                    `**Available items:**\n` +
+                    `🍪 \`snack\` - Small Snack (+10 energy)\n` +
+                    `🥤 \`drink\` - Energy Drink (+20 energy)\n` +
+                    `🍱 \`meal\` - Meal (+35 energy)\n` +
+                    `🍗 \`feast\` - Feast (+60 energy)\n` +
+                    `✨ \`full\` - Full Restore (+100 energy)`
+                )
+            );
+            return ctx.sendMessage({ components: [container] });
         }
 
         // Normalize item name
@@ -168,31 +204,58 @@ export default class Energy extends Command {
         const actualItem = itemMap[itemName];
         
         if (!actualItem || !energyConfig.restoration[actualItem]) {
-            return ctx.sendMessage(
-                `${emojis.general.error} Invalid item! Available items:\n` +
-                `🍪 \`smallSnack\` (+10 energy)\n` +
-                `🍱 \`meal\` (+25 energy)\n` +
-                `🍗 \`feast\` (+50 energy)\n` +
-                `🥤 \`energyDrink\` (+15 energy)\n` +
-                `✨ \`fullRestore\` (+100 energy)`
+            const container = this.client.container()
+                .setAccentColor(parseInt(this.client.color.error.replace('#', ''), 16));
+            container.addTextDisplayComponents(
+                (textDisplay) => textDisplay.setContent(
+                    `**${emojis.general.error} Invalid Item**\n` +
+                    `\n` +
+                    `**Available items:**\n` +
+                    `🍪 \`snack\` - Small Snack (+10 energy)\n` +
+                    `🥤 \`drink\` - Energy Drink (+20 energy)\n` +
+                    `🍱 \`meal\` - Meal (+35 energy)\n` +
+                    `🍗 \`feast\` - Feast (+60 energy)\n` +
+                    `✨ \`full\` - Full Restore (+100 energy)`
+                )
             );
+            return ctx.sendMessage({ components: [container] });
         }
 
         // Check if user has the item
         if (!profile.energyItems) profile.energyItems = {};
         if (!profile.energyItems[actualItem] || profile.energyItems[actualItem] <= 0) {
-            return ctx.sendMessage(`${emojis.general.error} You don't have any **${actualItem}**! Use \`!energy shop\` to buy items.`);
+            const container = this.client.container()
+                .setAccentColor(parseInt(this.client.color.error.replace('#', ''), 16));
+            container.addTextDisplayComponents(
+                (textDisplay) => textDisplay.setContent(
+                    `**${emojis.general.error} No Items**\n` +
+                    `_You don't have any **${actualItem}**!_\n` +
+                    `\n` +
+                    `Use \`${this.client.config.prefix}shop\` to buy energy items with seashells.`
+                )
+            );
+            return ctx.sendMessage({ components: [container] });
         }
 
         // Check if energy is already full
         updateEnergy(profile);
         const maxEnergy = profile.maxEnergy || energyConfig.maxEnergy;
         if (profile.energy >= maxEnergy) {
-            return ctx.sendMessage(`${emojis.general.error} Your energy is already full! (${profile.energy}/${maxEnergy})`);
+            const container = this.client.container()
+                .setAccentColor(parseInt(this.client.color.warn.replace('#', ''), 16));
+            container.addTextDisplayComponents(
+                (textDisplay) => textDisplay.setContent(
+                    `**⚡ Energy Full**\n` +
+                    `_Your energy is already at maximum (\`${profile.energy}/${maxEnergy}\`)!_\n` +
+                    `\n` +
+                    `You don't need to restore energy right now.`
+                )
+            );
+            return ctx.sendMessage({ components: [container] });
         }
 
         // Use the item
-        const restoreAmount = energyConfig.restoration[actualItem];
+        const restoreAmount = energyConfig.restoration[actualItem].energy;
         const beforeEnergy = profile.energy;
         
         restoreEnergy(profile, restoreAmount);
@@ -209,18 +272,56 @@ export default class Energy extends Command {
             energyDrink: '🥤',
             fullRestore: '✨'
         };
+        
+        const itemNames = {
+            smallSnack: 'Small Snack',
+            meal: 'Meal',
+            feast: 'Feast',
+            energyDrink: 'Energy Drink',
+            fullRestore: 'Full Restore'
+        };
 
-        const embed = new EmbedBuilder()
-            .setColor('#2ecc71')
-            .setTitle(`${emojis.general.success} Energy Restored!`)
-            .setDescription(
-                `You used ${itemEmojis[actualItem]} **${actualItem}**\n\n` +
-                `⚡ **${beforeEnergy}** → **${afterEnergy}** (+${actualRestored} energy)\n` +
-                `📦 **${actualItem}** remaining: ${profile.energyItems[actualItem]}`
+        const container = this.client.container()
+            .setAccentColor(parseInt(this.client.color.success.replace('#', ''), 16));
+        
+        container.addTextDisplayComponents(
+            (textDisplay) => textDisplay.setContent(
+                `## **${emojis.general.success} Energy Restored!**\n` +
+                `_You used ${itemEmojis[actualItem]} **${itemNames[actualItem]}**_`
             )
-            .setFooter({ text: `Energy: ${afterEnergy}/${maxEnergy}` })
-            .setTimestamp();
+        );
+        
+        container.addSeparatorComponents((separator) => separator.setDivider(true));
+        
+        const energyBar = this.createEnergyBar(afterEnergy, maxEnergy);
+        const energyPercent = Math.floor((afterEnergy / maxEnergy) * 100);
+        
+        container.addTextDisplayComponents(
+            (textDisplay) => textDisplay.setContent(
+                `**Energy Change:**\n` +
+                `\`${beforeEnergy}\` → \`${afterEnergy}\` (+${actualRestored} ⚡)\n` +
+                `\n` +
+                `${energyBar}\n` +
+                `\`${afterEnergy}/${maxEnergy}\` (${energyPercent}%)`
+            )
+        );
+        
+        container.addSeparatorComponents((separator) => separator.setDivider(true));
+        
+        container.addTextDisplayComponents(
+            (textDisplay) => textDisplay.setContent(
+                `**Remaining Items:**\n` +
+                `${itemEmojis[actualItem]} **${itemNames[actualItem]}** x${profile.energyItems[actualItem]}`
+            )
+        );
 
-        return ctx.sendMessage({ embeds: [embed] });
+        return ctx.sendMessage({ components: [container] });
+    }
+    
+    createEnergyBar(current, max) {
+        const barLength = 20;
+        const filled = Math.floor((current / max) * barLength);
+        const empty = barLength - filled;
+        return '▰'.repeat(filled) + '▱'.repeat(empty);
     }
 }

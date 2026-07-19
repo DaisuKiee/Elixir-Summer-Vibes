@@ -2,11 +2,12 @@
 // Secure peer-to-peer trading for fish, collectibles, and items
 
 import { v4 as uuidv4 } from 'uuid';
+import { getLevelFromXP } from './levelSystem.js';
 
 export const tradeConfig = {
     offerDuration: 5 * 60 * 1000, // 5 minutes
     maxOffersPerPlayer: 3, // Active offers limit
-    minLevel: 10, // Minimum tier to trade
+    minLevel: 10, // Minimum level to trade
     tradeCooldown: 60 * 1000, // 1 minute between trades
     taxRate: 0.05, // 5% tax on seashell trades
     
@@ -71,9 +72,10 @@ export function createTradeOffer(initiatorId, recipientId, initiatorOffer, recip
  * @returns {Object} Validation result
  */
 export function canInitiateTrade(profile, activeTradeCount = 0) {
-    const currentTier = Math.floor(profile.battlePassXP / 100);
+    const totalXP = profile.totalXP || profile.xp || profile.battlePassXP || 0;
+    const currentLevel = getLevelFromXP(totalXP);
     
-    if (currentTier < tradeConfig.minLevel) {
+    if (currentLevel < tradeConfig.minLevel) {
         return {
             canTrade: false,
             reason: `Must reach tier ${tradeConfig.minLevel} to trade`

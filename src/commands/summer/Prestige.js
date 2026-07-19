@@ -1,6 +1,6 @@
 import Command from '../../structures/Command.js';
 import SummerProfile from '../../schemas/summerProfile.js';
-import { getTierFromXP } from '../../data/battlepass.js';
+import { getLevelFromXP } from '../../data/levelSystem.js';
 import { 
     checkPrestigeRequirements, 
     performPrestige, 
@@ -72,7 +72,8 @@ export default class Prestige extends Command {
     }
     
     async showPrestigeInfo(ctx, profile, eligibility) {
-        const currentTier = getTierFromXP(profile.battlePassXP);
+        const totalXP = profile.totalXP || profile.xp || profile.battlePassXP || 0;
+        const currentLevel = getLevelFromXP(totalXP);
         const bonuses = getPrestigeBonuses(profile);
         
         const container = this.client.container()
@@ -87,11 +88,16 @@ export default class Prestige extends Command {
         container.addSeparatorComponents((separator) => separator.setDivider(true));
         
         // Requirements
+        const requiredLevel = eligibility.current.requiredLevel;
+        const requiredIslands = eligibility.current.requiredIslands;
+        const requiredFish = eligibility.current.requiredFish;
+        const requiredCollectibles = eligibility.current.requiredCollectibles;
+        
         let requirementsText = `> ### **📋 Requirements**\n`;
-        requirementsText += `> ${eligibility.current.tier >= 100 ? emojis.general.success : emojis.general.error} **Tier 100** - Current: \`${eligibility.current.tier}\`\n`;
-        requirementsText += `> ${eligibility.current.islands >= 54 ? emojis.general.success : emojis.general.error} **All 54 Islands** - Discovered: \`${eligibility.current.islands}\`\n`;
-        requirementsText += `> ${eligibility.current.fish >= 500 ? emojis.general.success : emojis.general.error} **500 Fish** - Caught: \`${eligibility.current.fish}\`\n`;
-        requirementsText += `> ${eligibility.current.collectibles >= 75 ? emojis.general.success : emojis.general.error} **75 Collectibles** - Found: \`${eligibility.current.collectibles}\``;
+        requirementsText += `> ${eligibility.current.tier >= requiredLevel ? emojis.general.success : emojis.general.error} **Level ${requiredLevel}** - Current: \`${eligibility.current.tier}\`\n`;
+        requirementsText += `> ${eligibility.current.islands >= requiredIslands ? emojis.general.success : emojis.general.error} **${requiredIslands} Islands** - Discovered: \`${eligibility.current.islands}\`\n`;
+        requirementsText += `> ${eligibility.current.fish >= requiredFish ? emojis.general.success : emojis.general.error} **${requiredFish} Fish** - Caught: \`${eligibility.current.fish}\`\n`;
+        requirementsText += `> ${eligibility.current.collectibles >= requiredCollectibles ? emojis.general.success : emojis.general.error} **${requiredCollectibles} Collectibles** - Found: \`${eligibility.current.collectibles}\``;
         
         container.addTextDisplayComponents(
             (textDisplay) => textDisplay.setContent(requirementsText)
@@ -100,51 +106,77 @@ export default class Prestige extends Command {
         container.addSeparatorComponents((separator) => separator.setDivider(true));
         
         // What you'll get
+        const currentPrestigeLevel = profile.prestigeLevel || 0;
+        const nextPrestigeLevel = currentPrestigeLevel + 1;
+        const nextRequiredLevel = 15 + (nextPrestigeLevel * 10);
+        const nextXpMultiplier = 1.0 + (nextPrestigeLevel * 0.5);
+        const nextFishMultiplier = 1.0 + (nextPrestigeLevel * 0.5);
+        
         container.addTextDisplayComponents(
-            (textDisplay) => textDisplay.setContent(`> ### **🎁 Rewards Upon Prestige**\n> **•** Prestige Level \`+1\` ⭐\n> **•** \`10 Prestige Points\` to spend in shop\n> **•** Permanent bonuses from purchased upgrades\n> **•** Prestige badge on your profile\n> **•** Variant chance increase (+0.1% per prestige)`)
+            (textDisplay) => textDisplay.setContent(`> ### **🎁 Rewards Upon Prestige**\n> **•** Prestige Level \`+1\` ⭐ (${nextPrestigeLevel}/50)\n> **•** \`10 Prestige Points\` to spend in shop\n> **•** \`${nextXpMultiplier}x XP Gain\` from all sources (automatic)\n> **•** \`${nextFishMultiplier}x Rare Fish Chance\` (automatic)\n> **•** Next prestige at Level ${nextRequiredLevel < 515 ? nextRequiredLevel : 'MAX'}`)
         );
         
         container.addSeparatorComponents((separator) => separator.setDivider(true));
         
         // What you'll lose
         container.addTextDisplayComponents(
-            (textDisplay) => textDisplay.setContent(`> ### **⚠️ What Gets Reset**\n> **•** Battle Pass XP and Level → \`0\`\n> **•** Seashells → \`0\`\n> **•** Fish Inventory & Count → \`0\`\n> **•** Islands Discovered → \`0\`\n> **•** Collectibles → \`0\`\n> **•** Exploration Progress → \`0\``)
+            (textDisplay) => textDisplay.setContent(`> ### **⚠️ What Gets Reset**\n> **•** Battle Pass XP and Level → \`0\`\n> **•** Fish Count (not inventory) → \`0\`\n> **•** Islands Discovered → \`0\`\n> **•** Collectibles → \`0\`\n> **•** Exploration Progress → \`0\``)
         );
         
         container.addSeparatorComponents((separator) => separator.setDivider(true));
         
         // What you keep
         container.addTextDisplayComponents(
-            (textDisplay) => textDisplay.setContent(`> ### **✅ What You Keep**\n> **•** Prestige Level & Points\n> **•** Prestige Upgrades (permanent)\n> **•** Variant Fish Collection\n> **•** Achievements\n> **•** Sun Tokens ${emojis.currency.sunToken}\n> **•** Cosmetics & Premium Pass\n> **•** Energy (refilled to max)`)
+            (textDisplay) => textDisplay.setContent(`> ### **✅ What You Keep**\n> **•** Prestige Level & Points\n> **•** Prestige Upgrades (permanent)\n> **•** Variant Fish Collection\n> **•** Fish Inventory ${emojis.fish.fishGeneral}\n> **•** Seashells ${emojis.currency.seashell}\n> **•** Achievements\n> **•** Sun Tokens ${emojis.currency.sunToken}\n> **•** Cosmetics & Premium Pass\n> **•** Energy (refilled to max)`)
         );
         
         container.addSeparatorComponents((separator) => separator.setDivider(true));
         
         // Current bonuses (if any)
         if (profile.prestigeLevel > 0) {
+            const currentPrestigeLevel = profile.prestigeLevel || 0;
+            const autoXpMult = 1.0 + (currentPrestigeLevel * 0.5);
+            const autoFishMult = 1.0 + (currentPrestigeLevel * 0.5);
+            
             let bonusText = `> ### **💪 Current Prestige Bonuses**\n`;
-            if (bonuses.xpMultiplier > 1.0) {
-                const percent = ((bonuses.xpMultiplier - 1.0) * 100).toFixed(0);
-                bonusText += `> **•** XP Gain: \`+${percent}%\`\n`;
-            }
-            if (bonuses.energyBonus > 0) {
-                bonusText += `> **•** Max Energy: \`+${bonuses.energyBonus}\`\n`;
-            }
-            if (bonuses.rareFishBonus > 0) {
-                const percent = (bonuses.rareFishBonus * 100).toFixed(1);
-                bonusText += `> **•** Rare Fish Chance: \`+${percent}%\`\n`;
-            }
-            if (bonuses.variantBonus > 0) {
-                const percent = (bonuses.variantBonus * 100).toFixed(1);
-                bonusText += `> **•** Variant Chance: \`+${percent}%\`\n`;
-            }
-            if (bonuses.dailyBonusMultiplier > 1.0) {
-                const percent = ((bonuses.dailyBonusMultiplier - 1.0) * 100).toFixed(0);
-                bonusText += `> **•** Daily Rewards: \`+${percent}%\`\n`;
-            }
-            if (bonuses.pityReduction > 0) {
-                const percent = (bonuses.pityReduction * 100).toFixed(0);
-                bonusText += `> **•** Pity Reduction: \`-${percent}%\`\n`;
+            bonusText += `> **Automatic Bonuses (Rebirth ${currentPrestigeLevel}):**\n`;
+            bonusText += `> **•** XP Gain: \`${autoXpMult}x\` (from rebirths)\n`;
+            bonusText += `> **•** Rare Fish Chance: \`${autoFishMult}x\` (from rebirths)\n`;
+            
+            // Add purchased upgrade bonuses
+            const hasPurchasedUpgrades = bonuses.purchasedXpMultiplier > 1.0 || 
+                                         bonuses.energyBonus > 0 || 
+                                         bonuses.rareFishBonus > 0 || 
+                                         bonuses.variantBonus > 0 || 
+                                         bonuses.dailyBonusMultiplier > 1.0 || 
+                                         bonuses.pityReduction > 0;
+            
+            if (hasPurchasedUpgrades) {
+                bonusText += `> \n> **Purchased Upgrades:**\n`;
+                if (bonuses.purchasedXpMultiplier > 1.0) {
+                    const percent = ((bonuses.purchasedXpMultiplier - 1.0) * 100).toFixed(0);
+                    const totalMult = (bonuses.xpMultiplier).toFixed(1);
+                    bonusText += `> **•** XP Boost: \`+${percent}%\` (Total: ${totalMult}x)\n`;
+                }
+                if (bonuses.energyBonus > 0) {
+                    bonusText += `> **•** Max Energy: \`+${bonuses.energyBonus}\`\n`;
+                }
+                if (bonuses.rareFishBonus > 0) {
+                    const percent = (bonuses.rareFishBonus * 100).toFixed(1);
+                    bonusText += `> **•** Rare Fish Bonus: \`+${percent}%\`\n`;
+                }
+                if (bonuses.variantBonus > 0) {
+                    const percent = (bonuses.variantBonus * 100).toFixed(1);
+                    bonusText += `> **•** Variant Chance: \`+${percent}%\`\n`;
+                }
+                if (bonuses.dailyBonusMultiplier > 1.0) {
+                    const percent = ((bonuses.dailyBonusMultiplier - 1.0) * 100).toFixed(0);
+                    bonusText += `> **•** Daily Rewards: \`+${percent}%\`\n`;
+                }
+                if (bonuses.pityReduction > 0) {
+                    const percent = (bonuses.pityReduction * 100).toFixed(0);
+                    bonusText += `> **•** Pity Reduction: \`-${percent}%\`\n`;
+                }
             }
             
             container.addTextDisplayComponents(
@@ -157,7 +189,7 @@ export default class Prestige extends Command {
         // Call to action
         if (eligibility.eligible) {
             container.addTextDisplayComponents(
-                (textDisplay) => textDisplay.setContent(`> ${emojis.general.success} **You meet all requirements!**\n> \n> **Ready to prestige?**\n> Use \`++prestige confirm\` to reset and gain permanent power!\n> \n> _This action cannot be undone!_`)
+                (textDisplay) => textDisplay.setContent(`> ${emojis.general.success} **You meet all requirements!**\n> \n> **Ready to prestige?**\n> Use \`${this.client.config.prefix}prestige confirm\` to reset and gain permanent power!\n> \n> _This action cannot be undone!_`)
             );
         } else {
             container.addTextDisplayComponents(

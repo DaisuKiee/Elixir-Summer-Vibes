@@ -20,11 +20,11 @@ export default class Sell extends Command {
     async run(ctx, args) {
         const profile = await SummerProfile.findById(ctx.author.id);
         if (!profile) {
-            return ctx.sendMessage(`${emojis.general.error} You don't have a summer profile! Use \`!fish\` to start fishing.`);
+            return ctx.sendMessage(`${emojis.general.error} You don't have a summer profile! Use \`${this.client.config.prefix}fish\` to start fishing.`);
         }
 
         if (profile.fishInventory.length === 0) {
-            return ctx.sendMessage(`${emojis.general.error} You don't have any fish to sell! Use \`!fish\` to catch some.`);
+            return ctx.sendMessage(`${emojis.general.error} You don't have any fish to sell! Use \`${this.client.config.prefix}fish\` to catch some.`);
         }
 
         // No args - show interactive menu
@@ -49,7 +49,7 @@ export default class Sell extends Command {
         if (input.includes('-')) {
             const [start, end] = input.split('-').map(n => parseInt(n));
             if (isNaN(start) || isNaN(end)) {
-                return ctx.sendMessage(`${emojis.general.error} Invalid range format! Use: \`!sell 1-5\``);
+                return ctx.sendMessage(`${emojis.general.error} Invalid range format! Use: \`${this.client.config.prefix}sell 1-5\``);
             }
             return this.sellRange(ctx, profile, start, end);
         }
@@ -57,26 +57,31 @@ export default class Sell extends Command {
         // Sell by index
         const index = parseInt(input);
         if (isNaN(index)) {
-            return ctx.sendMessage(`${emojis.general.error} Invalid input! Use: \`!sell <index|all|rarity>\``);
+            return ctx.sendMessage(`${emojis.general.error} Invalid input! Use: \`${this.client.config.prefix}sell <index|all|rarity>\``);
         }
 
         return this.sellByIndex(ctx, profile, index);
     }
 
     async showSellMenu(ctx, profile) {
-        const embed = new EmbedBuilder()
-            .setColor(this.client.color?.sell || '#f39c12')
-            .setAuthor({ name: `${ctx.author.username}'s Fish Market`, iconURL: ctx.author.displayAvatarURL() })
-            .setTitle(`${emojis.currency.seashell} Fish Selling Menu`)
-            .setDescription(
-                `You have **${profile.fishInventory.length}** fish in your inventory.\n` +
-                `Current balance: ${emojis.currency.seashell} **${profile.seashells.toLocaleString()}** seashells\n\n` +
-                `**How to sell:**\n` +
-                `\`!sell <index>\` - Sell specific fish (e.g., \`!sell 1\`)\n` +
-                `\`!sell <range>\` - Sell range (e.g., \`!sell 1-5\`)\n` +
-                `\`!sell all\` - Sell all fish\n` +
-                `\`!sell <rarity>\` - Sell by rarity (e.g., \`!sell common\`)`
-            );
+        const container = this.client.container()
+            .setAccentColor(parseInt(this.client.color.default.replace('#', ''), 16));
+        
+        container.addTextDisplayComponents(
+            (textDisplay) => textDisplay.setContent(`> ## **${emojis.currency.seashell} Fish Selling Menu**\n> _You have **${profile.fishInventory.length}** fish in your inventory._\n> _Current balance: ${emojis.currency.seashell} **${profile.seashells.toLocaleString()}** seashells_`)
+        );
+        
+        container.addSeparatorComponents((separator) => separator.setDivider(true));
+        
+        container.addTextDisplayComponents(
+            (textDisplay) => textDisplay.setContent(
+                `> **How to sell:**\n` +
+                `> \`${this.client.config.prefix}sell <index>\` - Sell specific fish (e.g., \`${this.client.config.prefix}sell 1\`)\n` +
+                `> \`${this.client.config.prefix}sell <range>\` - Sell range (e.g., \`${this.client.config.prefix}sell 1-5\`)\n` +
+                `> \`${this.client.config.prefix}sell all\` - Sell all fish\n` +
+                `> \`${this.client.config.prefix}sell <rarity>\` - Sell by rarity (e.g., \`${this.client.config.prefix}sell common\`)`
+            )
+        );
 
         // Calculate total value
         let totalValue = 0;
@@ -97,67 +102,180 @@ export default class Sell extends Command {
         });
 
         // Show rarity breakdown
-        let breakdown = '';
+        container.addSeparatorComponents((separator) => separator.setDivider(true));
+        
+        let breakdown = `> **${emojis.fish.fishGeneral} Inventory Breakdown**\n`;
         const rarities = ['common', 'uncommon', 'rare', 'epic', 'legendary', 'mythical'];
         rarities.forEach(rarity => {
             if (rarityCount[rarity]) {
                 const emoji = emojis.rarity[rarity] || '⚪';
-                breakdown += `${emoji} **${rarity.charAt(0).toUpperCase() + rarity.slice(1)}**: ${rarityCount[rarity]} fish (${emojis.currency.seashell} ${rarityValue[rarity].toLocaleString()})\n`;
+                breakdown += `> ${emoji} **${rarity.charAt(0).toUpperCase() + rarity.slice(1)}**: ${rarityCount[rarity]} fish (${emojis.currency.seashell} ${rarityValue[rarity].toLocaleString()})\n`;
             }
         });
-
-        if (breakdown) {
-            embed.addFields({
-                name: `${emojis.fish.fishGeneral} Inventory Breakdown`,
-                value: breakdown,
-                inline: false
-            });
-        }
-
-        embed.addFields({
-            name: `${emojis.currency.treasure} Total Inventory Value`,
-            value: `${emojis.currency.seashell} **${totalValue.toLocaleString()}** seashells`,
-            inline: false
-        });
-
-        // Quick sell buttons
-        const buttons = new ActionRowBuilder().addComponents(
-            new ButtonBuilder()
-                .setCustomId('sell_all_common')
-                .setLabel('Sell All Common')
-                .setEmoji(emojis.rarity.common)
-                .setStyle(ButtonStyle.Secondary),
-            new ButtonBuilder()
-                .setCustomId('sell_all')
-                .setLabel('Sell All')
-                .setEmoji(emojis.currency.seashell)
-                .setStyle(ButtonStyle.Danger)
+        
+        container.addTextDisplayComponents(
+            (textDisplay) => textDisplay.setContent(breakdown)
         );
-
-        embed.setFooter({ text: '💡 Tip: Upgrade your equipment for better catches!' });
-        embed.setTimestamp();
-
-        const reply = await ctx.sendMessage({ embeds: [embed], components: [buttons] });
-
+        
+        container.addSeparatorComponents((separator) => separator.setDivider(true));
+        
+        container.addTextDisplayComponents(
+            (textDisplay) => textDisplay.setContent(`> **${emojis.currency.treasure} Total Inventory Value**\n> ${emojis.currency.seashell} **${totalValue.toLocaleString()}** seashells`)
+        );
+        
+        container.addSeparatorComponents((separator) => separator.setDivider(true));
+        
+        container.addTextDisplayComponents(
+            (textDisplay) => textDisplay.setContent(`> **💡 Tip:** Upgrade your equipment for better catches!`)
+        );
+        
+        // Create components using Discord.js builders
+        const components = [];
+        
+        // Add fish select menu (max 25 options)
+        if (profile.fishInventory.length > 0) {
+            const fishOptions = profile.fishInventory.slice(0, 25).map((fish, index) => {
+                const fishInfo = this.getFishInfo(fish.name, fish.rarity);
+                const value = this.calculateFishValue(fish, fishInfo, profile);
+                const rarityEmoji = emojis.rarity[fish.rarity] || '⚪';
+                
+                return {
+                    label: `${fish.name} (${fish.rarity})`.substring(0, 100), // Discord limit
+                    description: `${fish.weight.toFixed(2)}kg - ${value.toLocaleString()} seashells`.substring(0, 100),
+                    value: `fish_${index}`,
+                    emoji: rarityEmoji
+                };
+            });
+            
+            const selectMenu = new StringSelectMenuBuilder()
+                .setCustomId(`sell_fish_select_${ctx.author.id}`)
+                .setPlaceholder('Select fish to sell...')
+                .setMinValues(1)
+                .setMaxValues(Math.min(fishOptions.length, 25))
+                .addOptions(fishOptions);
+            
+            const selectRow = new ActionRowBuilder().addComponents(selectMenu);
+            components.push(selectRow);
+        }
+        
+        // Quick sell buttons
+        const sellCommonButton = new ButtonBuilder()
+            .setCustomId(`sell_all_common_${ctx.author.id}`)
+            .setLabel('Sell All Common')
+            .setStyle(ButtonStyle.Secondary)
+            .setEmoji(emojis.rarity.common || '🟢');
+        
+        const sellAllButton = new ButtonBuilder()
+            .setCustomId(`sell_all_${ctx.author.id}`)
+            .setLabel('Sell All')
+            .setStyle(ButtonStyle.Danger)
+            .setEmoji(emojis.currency.seashell || '🐚');
+        
+        const buttonRow = new ActionRowBuilder().addComponents(sellCommonButton, sellAllButton);
+        components.push(buttonRow);
+        
+        const reply = await ctx.sendMessage({ components: [container, ...components] });
+        
         // Handle button interactions
         const collector = reply.createMessageComponentCollector({
-            filter: i => i.user.id === ctx.author.id,
-            time: 60000
+            filter: i => i.user.id === ctx.author.id && (i.customId.includes('sell_')),
+            time: 300000 // 5 minutes
         });
-
+        
         collector.on('collect', async interaction => {
-            if (interaction.customId === 'sell_all_common') {
-                await interaction.deferUpdate();
-                await this.sellByRarity(ctx, profile, 'common', interaction);
-            } else if (interaction.customId === 'sell_all') {
-                await interaction.deferUpdate();
-                await this.sellAll(ctx, profile, interaction);
+            await interaction.deferReply().catch(() => {});
+            
+            // Reload profile
+            const updatedProfile = await SummerProfile.findById(ctx.author.id);
+            
+            if (interaction.customId === `sell_all_common_${ctx.author.id}`) {
+                await this.sellByRarity(ctx, updatedProfile, 'common', interaction);
+            } else if (interaction.customId === `sell_all_${ctx.author.id}`) {
+                await this.sellAll(ctx, updatedProfile, interaction);
+            } else if (interaction.customId === `sell_fish_select_${ctx.author.id}`) {
+                // Handle fish selection
+                const selectedIndices = interaction.values.map(v => parseInt(v.replace('fish_', '')));
+                
+                let totalValue = 0;
+                const soldFish = {};
+                let removedFromAquarium = 0;
+                
+                // Sort in reverse to avoid index shifting
+                selectedIndices.sort((a, b) => b - a);
+                
+                for (const index of selectedIndices) {
+                    if (index >= 0 && index < updatedProfile.fishInventory.length) {
+                        const fish = updatedProfile.fishInventory[index];
+                        const fishInfo = this.getFishInfo(fish.name, fish.rarity);
+                        const value = this.calculateFishValue(fish, fishInfo, updatedProfile);
+                        totalValue += value;
+                        
+                        if (!soldFish[fish.rarity]) soldFish[fish.rarity] = 0;
+                        soldFish[fish.rarity]++;
+                        
+                        // Check if fish is in aquarium
+                        const aquarium = updatedProfile.aquarium || [];
+                        const aquariumIndex = aquarium.findIndex(af => 
+                            af.fishName === fish.name && 
+                            af.weight === fish.weight && 
+                            new Date(af.caughtAt).getTime() === new Date(fish.caughtAt).getTime()
+                        );
+                        
+                        if (aquariumIndex !== -1) {
+                            updatedProfile.aquarium.splice(aquariumIndex, 1);
+                            removedFromAquarium++;
+                        }
+                        
+                        updatedProfile.fishInventory.splice(index, 1);
+                    }
+                }
+                
+                updatedProfile.seashells += totalValue;
+                await updatedProfile.save();
+                
+                let breakdown = '';
+                Object.keys(soldFish).forEach(rarity => {
+                    const emoji = emojis.rarity[rarity] || '⚪';
+                    breakdown += `${emoji} **${rarity.charAt(0).toUpperCase() + rarity.slice(1)}**: ${soldFish[rarity]} fish\n`;
+                });
+                
+                const { EmbedBuilder } = await import('discord.js');
+                const embed = new EmbedBuilder()
+                    .setColor('#2ecc71')
+                    .setTitle(`${emojis.general.success} Fish Sold!`)
+                    .setDescription(
+                        `You sold **${selectedIndices.length}** fish!` +
+                        (removedFromAquarium > 0 ? `\n🌊 _${removedFromAquarium} fish removed from aquarium_` : '')
+                    )
+                    .addFields(
+                        {
+                            name: `${emojis.fish.fishGeneral} Fish Sold`,
+                            value: breakdown,
+                            inline: false
+                        },
+                        {
+                            name: `${emojis.currency.seashell} Earned`,
+                            value: `**${totalValue.toLocaleString()}** seashells`,
+                            inline: true
+                        },
+                        {
+                            name: `${emojis.currency.treasure} New Balance`,
+                            value: `**${updatedProfile.seashells.toLocaleString()}** seashells`,
+                            inline: true
+                        }
+                    )
+                    .setFooter({ text: `Fish remaining: ${updatedProfile.fishInventory.length}` })
+                    .setTimestamp();
+                
+                await interaction.followUp({ embeds: [embed] });
             }
         });
-
+        
         collector.on('end', () => {
-            reply.edit({ components: [] }).catch(() => {});
+            reply.edit({ components: [container] }).catch(() => {});
         });
+        
+        return reply;
     }
 
     async sellByIndex(ctx, profile, index) {
@@ -168,6 +286,19 @@ export default class Sell extends Command {
         const fish = profile.fishInventory[index - 1];
         const fishInfo = this.getFishInfo(fish.name, fish.rarity);
         const value = this.calculateFishValue(fish, fishInfo, profile);
+
+        // Check if fish is in aquarium
+        const aquarium = profile.aquarium || [];
+        const aquariumIndex = aquarium.findIndex(af => 
+            af.fishName === fish.name && 
+            af.weight === fish.weight && 
+            new Date(af.caughtAt).getTime() === new Date(fish.caughtAt).getTime()
+        );
+        
+        // Remove from aquarium if present
+        if (aquariumIndex !== -1) {
+            profile.aquarium.splice(aquariumIndex, 1);
+        }
 
         // Remove fish and add seashells
         profile.fishInventory.splice(index - 1, 1);
@@ -181,7 +312,8 @@ export default class Sell extends Command {
             .setDescription(
                 `You sold **${fish.name}** ${rarityEmoji}\n` +
                 `Weight: **${fish.weight.toFixed(2)}kg**\n` +
-                `Earned: ${emojis.currency.seashell} **${value.toLocaleString()}** seashells`
+                `Earned: ${emojis.currency.seashell} **${value.toLocaleString()}** seashells` +
+                (aquariumIndex !== -1 ? '\n🌊 _Removed from aquarium_' : '')
             )
             .addFields({
                 name: `${emojis.currency.treasure} New Balance`,
@@ -202,6 +334,7 @@ export default class Sell extends Command {
         const fishToSell = profile.fishInventory.slice(start - 1, end);
         let totalValue = 0;
         const soldFish = {};
+        let removedFromAquarium = 0;
 
         fishToSell.forEach(fish => {
             const fishInfo = this.getFishInfo(fish.name, fish.rarity);
@@ -210,6 +343,19 @@ export default class Sell extends Command {
 
             if (!soldFish[fish.rarity]) soldFish[fish.rarity] = 0;
             soldFish[fish.rarity]++;
+            
+            // Check if fish is in aquarium and remove it
+            const aquarium = profile.aquarium || [];
+            const aquariumIndex = aquarium.findIndex(af => 
+                af.fishName === fish.name && 
+                af.weight === fish.weight && 
+                new Date(af.caughtAt).getTime() === new Date(fish.caughtAt).getTime()
+            );
+            
+            if (aquariumIndex !== -1) {
+                profile.aquarium.splice(aquariumIndex, 1);
+                removedFromAquarium++;
+            }
         });
 
         // Remove fish and add seashells
@@ -226,7 +372,10 @@ export default class Sell extends Command {
         const embed = new EmbedBuilder()
             .setColor('#2ecc71')
             .setTitle(`${emojis.general.success} Fish Sold!`)
-            .setDescription(`You sold **${fishToSell.length}** fish from slots ${start} to ${end}!`)
+            .setDescription(
+                `You sold **${fishToSell.length}** fish from slots ${start} to ${end}!` +
+                (removedFromAquarium > 0 ? `\n🌊 _${removedFromAquarium} fish removed from aquarium_` : '')
+            )
             .addFields(
                 {
                     name: `${emojis.fish.fishGeneral} Fish Sold`,
@@ -259,9 +408,24 @@ export default class Sell extends Command {
         }
 
         let totalValue = 0;
+        let removedFromAquarium = 0;
+        
         fishToSell.forEach(fish => {
             const fishInfo = this.getFishInfo(fish.name, fish.rarity);
             totalValue += this.calculateFishValue(fish, fishInfo, profile);
+            
+            // Check if fish is in aquarium and remove it
+            const aquarium = profile.aquarium || [];
+            const aquariumIndex = aquarium.findIndex(af => 
+                af.fishName === fish.name && 
+                af.weight === fish.weight && 
+                new Date(af.caughtAt).getTime() === new Date(fish.caughtAt).getTime()
+            );
+            
+            if (aquariumIndex !== -1) {
+                profile.aquarium.splice(aquariumIndex, 1);
+                removedFromAquarium++;
+            }
         });
 
         // Remove fish and add seashells
@@ -273,7 +437,10 @@ export default class Sell extends Command {
         const embed = new EmbedBuilder()
             .setColor('#2ecc71')
             .setTitle(`${emojis.general.success} Fish Sold!`)
-            .setDescription(`You sold all **${rarity}** fish! ${rarityEmoji}`)
+            .setDescription(
+                `You sold all **${rarity}** fish! ${rarityEmoji}` +
+                (removedFromAquarium > 0 ? `\n🌊 _${removedFromAquarium} fish removed from aquarium_` : '')
+            )
             .addFields(
                 {
                     name: `${emojis.fish.fishGeneral} Fish Sold`,
@@ -300,6 +467,7 @@ export default class Sell extends Command {
     async sellAll(ctx, profile, interaction = null) {
         let totalValue = 0;
         const soldFish = {};
+        let removedFromAquarium = 0;
 
         profile.fishInventory.forEach(fish => {
             const fishInfo = this.getFishInfo(fish.name, fish.rarity);
@@ -308,12 +476,26 @@ export default class Sell extends Command {
 
             if (!soldFish[fish.rarity]) soldFish[fish.rarity] = 0;
             soldFish[fish.rarity]++;
+            
+            // Check if fish is in aquarium and remove it
+            const aquarium = profile.aquarium || [];
+            const aquariumIndex = aquarium.findIndex(af => 
+                af.fishName === fish.name && 
+                af.weight === fish.weight && 
+                new Date(af.caughtAt).getTime() === new Date(fish.caughtAt).getTime()
+            );
+            
+            if (aquariumIndex !== -1) {
+                profile.aquarium.splice(aquariumIndex, 1);
+                removedFromAquarium++;
+            }
         });
 
         const totalFish = profile.fishInventory.length;
 
         // Clear inventory and add seashells
         profile.fishInventory = [];
+        profile.aquarium = []; // Clear aquarium since all fish are sold
         profile.seashells += totalValue;
         await profile.save();
 
@@ -326,7 +508,10 @@ export default class Sell extends Command {
         const embed = new EmbedBuilder()
             .setColor('#2ecc71')
             .setTitle(`${emojis.general.success} All Fish Sold!`)
-            .setDescription(`You sold **${totalFish}** fish!`)
+            .setDescription(
+                `You sold **${totalFish}** fish!` +
+                (removedFromAquarium > 0 ? `\n🌊 _Aquarium cleared (${removedFromAquarium} fish)_` : '')
+            )
             .addFields(
                 {
                     name: `${emojis.fish.fishGeneral} Fish Sold`,
@@ -359,6 +544,25 @@ export default class Sell extends Command {
     calculateFishValue(fish, fishInfo, profile) {
         if (!fishInfo) return 50; // Default value
 
+        // First, check if this fish itself has mutations (from inventory)
+        if (fish.currentValue && fish.totalMutations > 0) {
+            return fish.currentValue;
+        }
+
+        // Check if fish is in aquarium and has mutated value
+        const aquarium = profile.aquarium || [];
+        const aquariumFish = aquarium.find(af => 
+            af.fishName === fish.name && 
+            af.weight === fish.weight && 
+            new Date(af.caughtAt).getTime() === new Date(fish.caughtAt).getTime()
+        );
+        
+        // If fish is in aquarium with mutations, use the mutated value
+        if (aquariumFish && aquariumFish.currentValue && aquariumFish.totalMutations > 0) {
+            return aquariumFish.currentValue;
+        }
+
+        // Otherwise calculate normal value
         let baseValue = fishInfo.value || 50;
 
         // Weight bonus (heavier fish worth more)

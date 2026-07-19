@@ -19,7 +19,7 @@ export default class Mines extends Command {
     async run(ctx, args) {
         const profile = await SummerProfile.findById(ctx.author.id);
         if (!profile) {
-            return ctx.sendMessage(`${emojis.general.error} You don't have a summer profile! Use \`!fish\` to start.`);
+            return ctx.sendMessage(`${emojis.general.error} You don't have a summer profile! Use \`${this.client.config.prefix}fish\` to start.`);
         }
 
         // Parse bet amount
@@ -288,7 +288,7 @@ export default class Mines extends Command {
                         actionRow.addComponents(
                             new ButtonBuilder()
                                 .setCustomId(`tile_${index}`)
-                                .setEmoji('❓')
+                                .setEmoji('1526700761898025015')
                                 .setStyle(ButtonStyle.Secondary)
                         );
                     }

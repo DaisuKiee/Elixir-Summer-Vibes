@@ -15,7 +15,7 @@ export default class Challenges extends Command {
                 usage: '[daily|weekly|server]',
                 examples: ['challenges', 'challenges daily', 'challenges server'],
             },
-            aliases: ['challenge', 'tasks', 'quests'],
+            aliases: ['challenge', 'task', 'tasks', 'quests'],
             category: 'summer',
             cooldown: 10,
             permissions: {

@@ -922,6 +922,7 @@ class Container extends Component {
         this.components = [];
         this.accent_color = undefined;
         this.spoiler = false;
+        this.button_accessory = undefined;
     }
 
     addComponents(...components) {
@@ -944,13 +945,31 @@ class Container extends Component {
         return this;
     }
 
+    setButtonAccessory(button) {
+        // If button is a function (builder callback), call it with a new Button instance
+        if (typeof button === 'function') {
+            const buttonInstance = new Button();
+            button(buttonInstance);
+            this.button_accessory = buttonInstance;
+        } else {
+            this.button_accessory = button;
+        }
+        return this;
+    }
+
     build() {
-        return {
+        const result = {
             type: this.type,
             components: this.components.map(component => component.build()),
             accent_color: this.accent_color,
             spoiler: this.spoiler
         };
+        
+        if (this.button_accessory) {
+            result.button_accessory = this.button_accessory.build();
+        }
+        
+        return result;
     }
 }
 

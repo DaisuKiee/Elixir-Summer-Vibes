@@ -149,14 +149,14 @@ export default class PrestigeShop extends Command {
         
         // Purchase instructions
         container.addTextDisplayComponents(
-            (textDisplay) => textDisplay.setContent(`> **💡 How to Purchase:**\n> \`++prestigeshop buy <upgrade name>\`\n> \n> **Examples:**\n> \`++prestigeshop buy xp boost\`\n> \`++prestigeshop buy energy capacity\`\n> \`++prestigeshop buy variant hunter\``)
+            (textDisplay) => textDisplay.setContent(`> **💡 How to Purchase:**\n> \`${this.client.config.prefix}prestigeshop buy <upgrade name>\`\n> \n> **Examples:**\n> \`${this.client.config.prefix}prestigeshop buy xp boost\`\n> \`${this.client.config.prefix}prestigeshop buy energy capacity\`\n> \`${this.client.config.prefix}prestigeshop buy variant hunter\``)
         );
         
         // Earn more points info
         if (profile.prestigePoints === 0) {
             container.addSeparatorComponents((separator) => separator.setDivider(true));
             container.addTextDisplayComponents(
-                (textDisplay) => textDisplay.setContent(`> ${emojis.general.info} **No Points Available**\n> _Earn prestige points by using \`++prestige\`_\n> _Each prestige grants 10 points!_`)
+                (textDisplay) => textDisplay.setContent(`> ${emojis.general.info} **No Points Available**\n> _Earn prestige points by using \`${this.client.config.prefix}prestige\`_\n> _Each prestige grants 10 points!_`)
             );
         }
         
@@ -212,7 +212,7 @@ export default class PrestigeShop extends Command {
                 .setAccentColor(parseInt((this.client.color?.error || '#ED4245').replace('#', ''), 16));
             
             container.addTextDisplayComponents(
-                (textDisplay) => textDisplay.setContent(`> **${emojis.general.locked} Not Prestiged Yet**\n> _You must reach prestige level 1 to access the shop._\n> \n> Use \`++prestige\` to learn more about prestiging!`)
+                (textDisplay) => textDisplay.setContent(`> **${emojis.general.locked} Not Prestiged Yet**\n> _You must reach prestige level 1 to access the shop._\n> \n> Use \`${this.client.config.prefix}prestige\` to learn more about prestiging!`)
             );
             
             return ctx.sendMessage({ components: [container] });
@@ -227,7 +227,7 @@ export default class PrestigeShop extends Command {
                 const container = this.client.container()
                     .setAccentColor(parseInt((this.client.color?.error || '#ED4245').replace('#', ''), 16));
                 container.addTextDisplayComponents(
-                    (textDisplay) => textDisplay.setContent(`> **${emojis.general.error} Missing Upgrade Name**\n> _Usage: \`++prestigeshop buy <upgrade name>\`_`)
+                    (textDisplay) => textDisplay.setContent(`> **${emojis.general.error} Missing Upgrade Name**\n> _Usage: \`${this.client.config.prefix}prestigeshop buy <upgrade name>\`_`)
                 );
                 return ctx.sendMessage({ components: [container] });
             }
@@ -236,7 +236,7 @@ export default class PrestigeShop extends Command {
                 const container = this.client.container()
                     .setAccentColor(parseInt((this.client.color?.error || '#ED4245').replace('#', ''), 16));
                 container.addTextDisplayComponents(
-                    (textDisplay) => textDisplay.setContent(`> **${emojis.general.error} Missing Upgrade Name**\n> _Usage: \`++prestigeshop buy <upgrade name>\`_\n> _Example: \`++prestigeshop buy xp boost\`_`)
+                    (textDisplay) => textDisplay.setContent(`> **${emojis.general.error} Missing Upgrade Name**\n> _Usage: \`${this.client.config.prefix}prestigeshop buy <upgrade name>\`_\n> _Example: \`${this.client.config.prefix}prestigeshop buy xp boost\`_`)
                 );
                 return ctx.sendMessage({ components: [container] });
             }
@@ -256,7 +256,7 @@ export default class PrestigeShop extends Command {
             const container = this.client.container()
                 .setAccentColor(parseInt((this.client.color?.error || '#ED4245').replace('#', ''), 16));
             container.addTextDisplayComponents(
-                (textDisplay) => textDisplay.setContent(`> **${emojis.general.error} Upgrade Not Found**\n> _Could not find upgrade: "${upgradeName}"_\n> _Use \`++prestigeshop\` to see all upgrades._`)
+                (textDisplay) => textDisplay.setContent(`> **${emojis.general.error} Upgrade Not Found**\n> _Could not find upgrade: "${upgradeName}"_\n> _Use \`${this.client.config.prefix}prestigeshop\` to see all upgrades._`)
             );
             return ctx.sendMessage({ components: [container] });
         }
@@ -335,7 +335,7 @@ export default class PrestigeShop extends Command {
         
         // Footer
         container.addTextDisplayComponents(
-            (textDisplay) => textDisplay.setContent(`> ${emojis.energy.lightbulb} _This bonus is permanent and applies immediately!_\n> Use \`++prestigeshop\` to view more upgrades.`)
+            (textDisplay) => textDisplay.setContent(`> ${emojis.energy.lightbulb} _This bonus is permanent and applies immediately!_\n> Use \`${this.client.config.prefix}prestigeshop\` to view more upgrades.`)
         );
         
         return ctx.sendMessage({ components: [container] });

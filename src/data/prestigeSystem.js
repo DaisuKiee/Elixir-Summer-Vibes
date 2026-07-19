@@ -1,11 +1,29 @@
 // Prestige/Rebirth System
 // Reset progress for permanent bonuses and exclusive rewards
 
+import { getLevelFromXP } from './levelSystem.js';
+
 export const prestigeRequirements = {
-    minTier: 100,              // Must reach tier 100
-    minIslands: 54,            // Must discover all 54 islands
-    minFish: 500,              // Must catch 500 fish
-    minCollectibles: 75        // Must find 75 collectibles
+    getRequiredLevel: (currentPrestigeLevel) => {
+        // First rebirth at level 15, then +10 each time
+        // Level 15, 25, 35, 45, 55, 65, etc.
+        return 15 + (currentPrestigeLevel * 10);
+    },
+    getRequiredIslands: (currentPrestigeLevel) => {
+        // Estimate: At level 15, player can explore ~6 islands
+        // Scale with prestige level to keep it achievable
+        // Rebirth 0: 6 islands, Rebirth 1: 12 islands, etc.
+        return 6 + (currentPrestigeLevel * 6);
+    },
+    getRequiredFish: (currentPrestigeLevel) => {
+        // Rebirth 0: 100 fish, Rebirth 1: 200 fish, Rebirth 2: 300 fish
+        return 100 + (currentPrestigeLevel * 100);
+    },
+    getRequiredCollectibles: (currentPrestigeLevel) => {
+        // Rebirth 0: 15 collectibles, Rebirth 1: 25, Rebirth 2: 35
+        return 15 + (currentPrestigeLevel * 10);
+    },
+    maxPrestigeLevel: 50        // Maximum 50 rebirths
 };
 
 export const prestigePointsPerLevel = 10; // Points earned per prestige
@@ -112,34 +130,65 @@ export const prestigeUpgrades = {
  * @returns {Object} - Check result with missing requirements
  */
 export function checkPrestigeRequirements(profile) {
-    const currentTier = Math.floor(profile.battlePassXP / 100);
+    const currentPrestigeLevel = profile.prestigeLevel || 0;
+    const totalXP = profile.totalXP || profile.xp || profile.battlePassXP || 0;
+    const currentLevel = getLevelFromXP(totalXP);
+    const requiredLevel = prestigeRequirements.getRequiredLevel(currentPrestigeLevel);
+    const requiredIslands = prestigeRequirements.getRequiredIslands(currentPrestigeLevel);
+    const requiredFish = prestigeRequirements.getRequiredFish(currentPrestigeLevel);
+    const requiredCollectibles = prestigeRequirements.getRequiredCollectibles(currentPrestigeLevel);
+    
     const uniqueIslands = (profile.visitedIslands || []).length;
     const fishCaught = profile.fishCaught || 0;
     const collectibles = (profile.collectibles || []).length;
     
     const missing = [];
     
-    if (currentTier < prestigeRequirements.minTier) {
-        missing.push(`Tier ${currentTier}/${prestigeRequirements.minTier}`);
+    // Check if max prestige reached
+    if (currentPrestigeLevel >= prestigeRequirements.maxPrestigeLevel) {
+        return {
+            eligible: false,
+            missing: ['Maximum prestige level reached'],
+            maxReached: true,
+            current: {
+                level: currentLevel,
+                requiredLevel: requiredLevel,
+                islands: uniqueIslands,
+                requiredIslands: requiredIslands,
+                fish: fishCaught,
+                requiredFish: requiredFish,
+                collectibles: collectibles,
+                requiredCollectibles: requiredCollectibles
+            }
+        };
     }
-    if (uniqueIslands < prestigeRequirements.minIslands) {
-        missing.push(`Islands ${uniqueIslands}/${prestigeRequirements.minIslands}`);
+    
+    if (currentLevel < requiredLevel) {
+        missing.push(`Level ${currentLevel}/${requiredLevel}`);
     }
-    if (fishCaught < prestigeRequirements.minFish) {
-        missing.push(`Fish ${fishCaught}/${prestigeRequirements.minFish}`);
+    if (uniqueIslands < requiredIslands) {
+        missing.push(`Islands ${uniqueIslands}/${requiredIslands}`);
     }
-    if (collectibles < prestigeRequirements.minCollectibles) {
-        missing.push(`Collectibles ${collectibles}/${prestigeRequirements.minCollectibles}`);
+    if (fishCaught < requiredFish) {
+        missing.push(`Fish ${fishCaught}/${requiredFish}`);
+    }
+    if (collectibles < requiredCollectibles) {
+        missing.push(`Collectibles ${collectibles}/${requiredCollectibles}`);
     }
     
     return {
         eligible: missing.length === 0,
         missing: missing,
+        maxReached: false,
         current: {
-            tier: currentTier,
+            level: currentLevel,
+            requiredLevel: requiredLevel,
             islands: uniqueIslands,
+            requiredIslands: requiredIslands,
             fish: fishCaught,
-            collectibles: collectibles
+            requiredFish: requiredFish,
+            collectibles: collectibles,
+            requiredCollectibles: requiredCollectibles
         }
     };
 }
@@ -161,8 +210,9 @@ export function performPrestige(profile) {
     }
     
     // Store pre-prestige stats for summary
+    const totalXP = profile.totalXP || profile.xp || profile.battlePassXP || 0;
     const prePrestigeStats = {
-        tier: Math.floor(profile.battlePassXP / 100),
+        level: getLevelFromXP(totalXP),
         islands: (profile.visitedIslands || []).length,
         fish: profile.fishCaught || 0,
         collectibles: (profile.collectibles || []).length,
@@ -177,11 +227,21 @@ export function performPrestige(profile) {
     profile.lastPrestigeDate = new Date();
     
     // Reset progress
-    profile.battlePassXP = 0;
-    profile.battlePassLevel = 1;
-    profile.seashells = 0;
+    profile.xp = 0;
+    profile.totalXP = 0;
+    profile.level = 1;
+    
+    // Keep legacy fields in sync during migration
+    if (profile.battlePassXP !== undefined) {
+        profile.battlePassXP = 0;
+        profile.battlePassLevel = 1;
+    }
+    
+    // Seashells are NOT reset - players keep their currency
+    // profile.seashells = 0; // REMOVED - keep seashells
     profile.fishCaught = 0;
-    profile.fishInventory = [];
+    // Fish inventory is NOT reset - players keep their collection
+    // profile.fishInventory = []; // REMOVED - keep fish inventory
     profile.beachesExplored = 0;
     profile.visitedIslands = [];
     profile.islandDiscoveries = [];
@@ -349,8 +409,10 @@ export function getPrestigeShop(profile) {
  * @returns {Object} - Summary of all bonuses
  */
 export function getPrestigeBonuses(profile) {
+    const prestigeLevel = profile.prestigeLevel || 0;
+    
     if (!profile.prestigeUnlocks) {
-        return {
+        profile.prestigeUnlocks = {
             xpMultiplier: 1.0,
             energyBonus: 0,
             rareFishBonus: 0,
@@ -362,10 +424,28 @@ export function getPrestigeBonuses(profile) {
         };
     }
     
+    // Calculate automatic rebirth bonuses
+    // Each rebirth grants: 1.5x at first, then +0.5x per additional rebirth
+    // Rebirth 1: 1.5x, Rebirth 2: 2.0x, Rebirth 3: 2.5x, etc.
+    const autoXpMultiplier = prestigeLevel > 0 ? 1.0 + (prestigeLevel * 0.5) : 1.0;
+    const autoRareFishMultiplier = prestigeLevel > 0 ? 1.0 + (prestigeLevel * 0.5) : 1.0;
+    
+    // Combine automatic bonuses with purchased upgrades
+    const purchasedXpBonus = (profile.prestigeUnlocks.xpMultiplier || 1.0);
+    const purchasedRareFishBonus = (profile.prestigeUnlocks.rareFishBonus || 0);
+    
     return {
-        xpMultiplier: profile.prestigeUnlocks.xpMultiplier || 1.0,
+        // XP multiplier: automatic rebirth bonus * purchased upgrades
+        xpMultiplier: autoXpMultiplier * purchasedXpBonus,
+        autoXpMultiplier: autoXpMultiplier, // Track separately for display
+        purchasedXpMultiplier: purchasedXpBonus,
+        
+        // Rare fish: automatic rebirth multiplier + purchased bonus percentage
+        rareFishMultiplier: autoRareFishMultiplier,
+        rareFishBonus: purchasedRareFishBonus,
+        
+        // Other bonuses from purchased upgrades
         energyBonus: profile.prestigeUnlocks.energyBonus || 0,
-        rareFishBonus: profile.prestigeUnlocks.rareFishBonus || 0,
         dailyBonusMultiplier: profile.prestigeUnlocks.dailyBonusMultiplier || 1.0,
         variantBonus: profile.prestigeUnlocks.variantBonus || 0,
         energyRegenBonus: profile.prestigeUnlocks.energyRegenBonus || 0,

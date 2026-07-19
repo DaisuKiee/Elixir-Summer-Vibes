@@ -10,6 +10,7 @@ import {
     breedingRarity,
     genericBreedingRules
 } from './breedingPairs.js';
+import { getLevelFromXP } from './levelSystem.js';
 import { rollForVariant, trackVariantCatch } from './variantSystem.js';
 
 /**
@@ -19,10 +20,11 @@ import { rollForVariant, trackVariantCatch } from './variantSystem.js';
  * @returns {Object} Check result
  */
 export function canBreed(profile, targetRarity = breedingRarity.COMMON) {
-    const currentTier = Math.floor(profile.battlePassXP / 100);
+    const totalXP = profile.totalXP || profile.xp || profile.battlePassXP || 0;
+    const currentLevel = getLevelFromXP(totalXP);
     const requiredTier = getBreedingRequirement(targetRarity);
     
-    if (currentTier < requiredTier) {
+    if (currentLevel < requiredTier) {
         return {
             canBreed: false,
             reason: `Reach tier ${requiredTier} to breed ${targetRarity} fish`,

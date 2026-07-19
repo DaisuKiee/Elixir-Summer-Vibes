@@ -1,6 +1,7 @@
 import Command from '../../structures/Command.js';
 import SummerProfile from '../../schemas/summerProfile.js';
-import { generateDailyChallenges } from '../../data/challenges.js';
+import { generateDailyChallenges, generateWeeklyChallenges } from '../../data/challenges.js';
+import { awardXP } from '../../utils/xpRewards.js';
 import { emojis } from '../../config/emojis.js';
 
 export default class Daily extends Command {
@@ -34,7 +35,7 @@ export default class Daily extends Command {
                 username: ctx.author.tag
             });
         }
-        
+
         // Check if daily already claimed
         const now = new Date();
         const lastDaily = profile.lastDaily ? new Date(profile.lastDaily) : null;
@@ -90,41 +91,31 @@ export default class Daily extends Command {
             feast: streakDays % 7 === 0 ? 1 : 0, // Get 1 feast on weekly milestones
         };
         
-        // Fix corrupted challenges (if they're strings instead of objects)
-        if (profile.dailyChallenges && typeof profile.dailyChallenges === 'string') {
-            console.log('[FIX] Detected corrupted daily challenges (string), regenerating...');
-            profile.dailyChallenges = [];
-        }
-        if (profile.weeklyChallenges && typeof profile.weeklyChallenges === 'string') {
-            console.log('[FIX] Detected corrupted weekly challenges (string), regenerating...');
-            profile.weeklyChallenges = [];
-        }
-        
-        // Also check if first element is a string
-        if (Array.isArray(profile.dailyChallenges) && profile.dailyChallenges.length > 0 && typeof profile.dailyChallenges[0] === 'string') {
-            console.log('[FIX] Detected corrupted daily challenges (string elements), regenerating...');
-            profile.dailyChallenges = [];
-        }
-        if (Array.isArray(profile.weeklyChallenges) && profile.weeklyChallenges.length > 0 && typeof profile.weeklyChallenges[0] === 'string') {
-            console.log('[FIX] Detected corrupted weekly challenges (string elements), regenerating...');
-            profile.weeklyChallenges = [];
-        }
-        
         // Generate new daily challenges if needed
         const needsNewChallenges = !profile.dailyChallenges || 
                                    profile.dailyChallenges.length === 0 || 
-                                   this.areChallengesExpired(profile.dailyChallenges) ||
-                                   profile.dailyChallenges.some(c => !c.type); // Regenerate if missing type field
+                                   this.areChallengesExpired(profile.dailyChallenges);
         
         if (needsNewChallenges) {
             profile.dailyChallenges = generateDailyChallenges();
         }
         
+        // Generate new weekly challenges if needed (resets every Monday or if expired)
+        const needsNewWeeklyChallenges = !profile.weeklyChallenges || 
+                                         profile.weeklyChallenges.length === 0 || 
+                                         this.areChallengesExpired(profile.weeklyChallenges);
+        
+        if (needsNewWeeklyChallenges) {
+            profile.weeklyChallenges = generateWeeklyChallenges();
+        }
+        
         // Update profile
         profile.lastDaily = now;
         profile.daysActive = streakDays;
-        profile.battlePassXP += xpEarned;
-        profile.totalXPEarned += xpEarned;
+        
+        // Award XP using new system
+        await awardXP(profile, xpEarned);
+        
         profile.seashells += seashellsEarned;
         profile.sunTokens += sunTokensEarned;
         
@@ -145,7 +136,64 @@ export default class Daily extends Command {
         profile.energyItems.energyDrink += energyItemRewards.energyDrink;
         profile.energyItems.feast += energyItemRewards.feast;
         
-        await profile.save();
+        // Save with retry logic to handle version conflicts
+        let saveSuccess = false;
+        let retries = 3;
+        
+        while (!saveSuccess && retries > 0) {
+            try {
+                await profile.save();
+                saveSuccess = true;
+            } catch (error) {
+                if (error.name === 'VersionError' && retries > 1) {
+                    retries--;
+                    // Reload the profile and reapply changes
+                    profile = await SummerProfile.findById(ctx.author.id);
+                    
+                    // Reapply all changes
+                    profile.lastDaily = now;
+                    profile.daysActive = streakDays;
+                    
+                    // Update challenges
+                    if (profile.dailyChallenges) {
+                        const challenge = profile.dailyChallenges.find(c => c.challengeId === 'daily_login');
+                        if (challenge) {
+                            challenge.progress = streakDays;
+                            challenge.isCompleted = streakDays >= challenge.requirement;
+                            if (challenge.isCompleted && !challenge.rewardClaimed) {
+                                challenge.rewardClaimed = true;
+                            }
+                        }
+                    }
+                    
+                    // Reapply rewards
+                    profile.xp = (profile.xp || 0) + xpEarned;
+                    profile.totalXP = (profile.totalXP || profile.xp || 0) + xpEarned;
+                    profile.battlePassXP = (profile.battlePassXP || 0) + xpEarned;
+                    profile.seashells += seashellsEarned;
+                    profile.sunTokens += sunTokensEarned;
+                    
+                    if (!profile.energyItems) {
+                        profile.energyItems = {
+                            smallSnack: 0,
+                            meal: 0,
+                            feast: 0,
+                            energyDrink: 0,
+                            fullRestore: 0
+                        };
+                    }
+                    
+                    profile.energyItems.smallSnack += energyItemRewards.smallSnack;
+                    profile.energyItems.meal += energyItemRewards.meal;
+                    profile.energyItems.energyDrink += energyItemRewards.energyDrink;
+                    profile.energyItems.feast += energyItemRewards.feast;
+                    
+                    console.log(`[Daily] Retrying save for ${ctx.author.id}, attempts left: ${retries}`);
+                } else {
+                    throw error; // Re-throw if not a version error or out of retries
+                }
+            }
+        }
         
         const container = this.client.container()
             .setAccentColor(parseInt(this.client.color.success.replace('#', ''), 16));
@@ -204,6 +252,21 @@ export default class Daily extends Command {
             container.addTextDisplayComponents((textDisplay) => textDisplay.setContent(challengesText));
         }
         
+        // Weekly challenges preview
+        if (profile.weeklyChallenges && profile.weeklyChallenges.length > 0) {
+            container.addSeparatorComponents((separator) => separator.setDivider(true));
+            
+            const weeklyText = `> **📆 Weekly Challenges**\n` +
+                profile.weeklyChallenges.slice(0, 3).map((c, i) => {
+                    const progress = c.progress || 0;
+                    const status = progress >= c.goal ? emojis.ui.check : emojis.general.loading;
+                    return `> ${status} \`${i + 1}.\` ${c.description} (${progress}/${c.goal})`;
+                }).join('\n') +
+                (profile.weeklyChallenges.length > 3 ? `\n> _+${profile.weeklyChallenges.length - 3} more weekly challenges_` : '');
+            
+            container.addTextDisplayComponents((textDisplay) => textDisplay.setContent(weeklyText));
+        }
+        
         // Milestone rewards
         if (streakDays % 7 === 0) {
             container.addSeparatorComponents((separator) => separator.setDivider(true));
@@ -217,7 +280,7 @@ export default class Daily extends Command {
         
         const nextDailyTime = Math.floor((now.getTime() + 24 * 60 * 60 * 1000) / 1000);
         container.addTextDisplayComponents(
-            (textDisplay) => textDisplay.setContent('> **⏰ Next Daily:** <t:' + nextDailyTime + ':R>\n> _Use `++challenges` to view daily challenges!_\n> _Use `++energy` to manage your energy!_')
+            (textDisplay) => textDisplay.setContent('> **⏰ Next Daily:** <t:' + nextDailyTime + ':R>\n> _Use `' + this.client.config.prefix + 'challenges` to view daily challenges!_\n> _Use `' + this.client.config.prefix + 'energy` to manage your energy!_')
         );
         
         return ctx.sendMessage({ components: [container] });

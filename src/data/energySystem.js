@@ -1,6 +1,8 @@
 // Energy System - Strategic Resource Management
 // Players have limited energy that regenerates daily
 
+import { equipmentData } from './equipment.js';
+
 export const energyConfig = {
     maxEnergy: 100,
     regenRate: 1, // 1 energy per hour
@@ -8,8 +10,8 @@ export const energyConfig = {
     
     // Activity costs
     costs: {
-        fishing: 15,
-        exploring: 20,
+        fishing: 5,
+        exploring: 5,
         traveling: 10,
         deepSeaFishing: 30,
         dangerousExploration: 35,
@@ -19,13 +21,13 @@ export const energyConfig = {
         research: 10
     },
     
-    // Energy restoration items
+    // Energy restoration items (seashell costs and restoration amounts)
     restoration: {
-        smallSnack: 10,
-        meal: 25,
-        feast: 50,
-        energyDrink: 15,
-        fullRestore: 100
+        smallSnack: { cost: 400, energy: 10 },
+        energyDrink: { cost: 900, energy: 20 },
+        meal: { cost: 1800, energy: 35 },
+        feast: { cost: 4500, energy: 60 },
+        fullRestore: { cost: 12000, energy: 100 }
     }
 };
 
@@ -35,8 +37,19 @@ export const energyConfig = {
  * @returns {Number} Current energy
  */
 export function calculateCurrentEnergy(profile) {
-    // Get max energy (base + prestige bonus)
-    const maxEnergy = profile.maxEnergy || energyConfig.maxEnergy;
+    // Get max energy from equipment level (primary source) or fallback
+    let maxEnergy = energyConfig.maxEnergy; // Default 100
+    
+    // Check if equipment.energyBar exists and get max energy from equipment data
+    if (profile.equipment && profile.equipment.energyBar && profile.equipment.energyBar.level) {
+        const energyBarData = equipmentData.energyBar[profile.equipment.energyBar.level];
+        if (energyBarData) {
+            maxEnergy = energyBarData.maxEnergy;
+        }
+    } else if (profile.maxEnergy) {
+        // Fallback to profile.maxEnergy if equipment not set
+        maxEnergy = profile.maxEnergy;
+    }
     
     if (!profile.energy) profile.energy = maxEnergy;
     if (!profile.lastEnergyUpdate) {
@@ -68,6 +81,14 @@ export function updateEnergy(profile) {
     const currentEnergy = calculateCurrentEnergy(profile);
     profile.energy = currentEnergy;
     profile.lastEnergyUpdate = new Date();
+    
+    // Sync maxEnergy field with equipment level
+    if (profile.equipment && profile.equipment.energyBar && profile.equipment.energyBar.level) {
+        const energyBarData = equipmentData.energyBar[profile.equipment.energyBar.level];
+        if (energyBarData) {
+            profile.maxEnergy = energyBarData.maxEnergy;
+        }
+    }
 }
 
 /**
@@ -119,7 +140,19 @@ export function consumeEnergy(profile, action) {
  */
 export function restoreEnergy(profile, amount) {
     updateEnergy(profile);
-    profile.energy = Math.min(profile.energy + amount, energyConfig.maxEnergy);
+    
+    // Get max energy from equipment level
+    let maxEnergy = energyConfig.maxEnergy;
+    if (profile.equipment && profile.equipment.energyBar && profile.equipment.energyBar.level) {
+        const energyBarData = equipmentData.energyBar[profile.equipment.energyBar.level];
+        if (energyBarData) {
+            maxEnergy = energyBarData.maxEnergy;
+        }
+    } else if (profile.maxEnergy) {
+        maxEnergy = profile.maxEnergy;
+    }
+    
+    profile.energy = Math.min(profile.energy + amount, maxEnergy);
     profile.lastEnergyUpdate = new Date();
 }
 
@@ -131,11 +164,22 @@ export function restoreEnergy(profile, amount) {
 export function getTimeUntilFull(profile) {
     const currentEnergy = calculateCurrentEnergy(profile);
     
-    if (currentEnergy >= energyConfig.maxEnergy) {
+    // Get max energy from equipment level
+    let maxEnergy = energyConfig.maxEnergy;
+    if (profile.equipment && profile.equipment.energyBar && profile.equipment.energyBar.level) {
+        const energyBarData = equipmentData.energyBar[profile.equipment.energyBar.level];
+        if (energyBarData) {
+            maxEnergy = energyBarData.maxEnergy;
+        }
+    } else if (profile.maxEnergy) {
+        maxEnergy = profile.maxEnergy;
+    }
+    
+    if (currentEnergy >= maxEnergy) {
         return { hours: 0, minutes: 0, isFull: true };
     }
     
-    const energyNeeded = energyConfig.maxEnergy - currentEnergy;
+    const energyNeeded = maxEnergy - currentEnergy;
     const hoursNeeded = energyNeeded / energyConfig.regenRate;
     const hours = Math.floor(hoursNeeded);
     const minutes = Math.floor((hoursNeeded - hours) * 60);
@@ -150,11 +194,23 @@ export function getTimeUntilFull(profile) {
  */
 export function formatEnergyDisplay(profile) {
     const currentEnergy = calculateCurrentEnergy(profile);
-    const percent = Math.floor((currentEnergy / energyConfig.maxEnergy) * 100);
+    
+    // Get max energy from equipment level
+    let maxEnergy = energyConfig.maxEnergy;
+    if (profile.equipment && profile.equipment.energyBar && profile.equipment.energyBar.level) {
+        const energyBarData = equipmentData.energyBar[profile.equipment.energyBar.level];
+        if (energyBarData) {
+            maxEnergy = energyBarData.maxEnergy;
+        }
+    } else if (profile.maxEnergy) {
+        maxEnergy = profile.maxEnergy;
+    }
+    
+    const percent = Math.floor((currentEnergy / maxEnergy) * 100);
     
     // Energy bar (20 characters)
     const barLength = 20;
-    const filled = Math.floor((currentEnergy / energyConfig.maxEnergy) * barLength);
+    const filled = Math.floor((currentEnergy / maxEnergy) * barLength);
     const bar = '▰'.repeat(filled) + '▱'.repeat(barLength - filled);
     
     let status = '🟢';
@@ -163,9 +219,9 @@ export function formatEnergyDisplay(profile) {
     
     return {
         bar: bar,
-        text: `${status} **Energy:** \`${currentEnergy}/${energyConfig.maxEnergy}\` (${percent}%)`,
+        text: `${status} **Energy:** \`${currentEnergy}/${maxEnergy}\` (${percent}%)`,
         current: currentEnergy,
-        max: energyConfig.maxEnergy,
+        max: maxEnergy,
         percent: percent
     };
 }

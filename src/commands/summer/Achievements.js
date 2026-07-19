@@ -1,6 +1,6 @@
 import Command from '../../structures/Command.js';
 import SummerProfile from '../../schemas/summerProfile.js';
-import { getTierFromXP } from '../../data/battlepass.js';
+import { getLevelFromXP } from '../../data/levelSystem.js';
 import {
     achievementCategories,
     achievementTiers,

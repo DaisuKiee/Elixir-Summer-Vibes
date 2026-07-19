@@ -18,11 +18,14 @@ export default class Fishdex extends Command {
     async run(ctx, args) {
         const profile = await SummerProfile.findById(ctx.author.id);
         if (!profile) {
-            return ctx.sendMessage(`${emojis.general.error} You don't have a summer profile! Use \`!fish\` to start fishing.`);
+            return ctx.sendMessage(`${emojis.general.error} You don't have a summer profile! Use \`${this.client.config.prefix}fish\` to start fishing.`);
         }
 
-        // Get all caught fish names (including variants)
-        const caughtFishNames = new Set(profile.fishInventory.map(f => f.name));
+        // Get all caught fish names from permanent collection
+        const caughtFishNames = new Set(profile.fishCollection || []);
+        
+        // Also add from fishInventory for backwards compatibility
+        profile.fishInventory.forEach(f => caughtFishNames.add(f.name));
         
         // Add variant fish to caught list
         if (profile.variantFish && profile.variantFish.length > 0) {
@@ -161,7 +164,11 @@ export default class Fishdex extends Command {
             );
 
         // Add rarity breakdown
-        const caughtFishNames = new Set(profile.fishInventory.map(f => f.name));
+        const caughtFishNames = new Set(profile.fishCollection || []);
+        
+        // Add from inventory for backwards compatibility
+        profile.fishInventory.forEach(f => caughtFishNames.add(f.name));
+        
         if (profile.variantFish && profile.variantFish.length > 0) {
             profile.variantFish.forEach(vf => {
                 if (vf.fishId) caughtFishNames.add(vf.fishId);
@@ -233,11 +240,36 @@ export default class Fishdex extends Command {
         let fishDisplay = '';
         fishList.forEach((fish, index) => {
             const isCaught = caughtFishNames.has(fish.name);
-            const icon = isCaught ? emojis.ui.check : emojis.ui.cross;
+            
+            // Get fish-specific emoji
+            let fishEmoji = '<:question:1526700761898025015>';
+            if (isCaught) {
+                // Convert fish name to emoji key format (e.g., "Yellowfin Tuna" -> "yellowfinTuna")
+                const emojiKey = fish.name.replace(/\s+/g, '')
+                    .replace(/^./, str => str.toLowerCase())
+                    .replace(/-/g, '');
+                
+                // Try to get the specific fish emoji, fallback to generic based on rarity
+                if (emojis.fish[emojiKey]) {
+                    fishEmoji = emojis.fish[emojiKey];
+                } else {
+                    // Fallback to generic fish emoji based on rarity
+                    const rarityEmojis = {
+                        common: emojis.fish.fishGeneral,
+                        uncommon: emojis.fish.tropicalFish,
+                        rare: emojis.fish.blowfish,
+                        epic: emojis.fish.shark,
+                        legendary: emojis.fish.whale,
+                        mythical: emojis.fish.dragon
+                    };
+                    fishEmoji = rarityEmojis[category] || emojis.fish.fishGeneral;
+                }
+            }
+            
             const fishName = isCaught ? fish.name : '???';
             const weightRange = isCaught ? ` (${fish.minWeight}-${fish.maxWeight}kg)` : '';
             
-            fishDisplay += `${icon} **${index + 1}.** ${fishName}${weightRange}\n`;
+            fishDisplay += `${fishEmoji} **${index + 1}.** ${fishName}${weightRange}\n`;
         });
 
         embed.addFields({

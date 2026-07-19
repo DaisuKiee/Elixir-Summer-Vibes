@@ -1,6 +1,6 @@
 import Command from '../../structures/Command.js';
 import SummerProfile from '../../schemas/summerProfile.js';
-import { getTierFromXP } from '../../data/battlepass.js';
+import { getLevelFromXP } from '../../data/levelSystem.js';
 import { 
     getAvailableBaits, 
     getBaitById, 
@@ -113,8 +113,9 @@ export default class Bait extends Command {
     }
     
     async showShop(ctx, profile) {
-        const currentTier = getTierFromXP(profile.battlePassXP);
-        const availableBaits = getAvailableBaits(currentTier);
+        const totalXP = profile.totalXP || profile.xp || profile.battlePassXP || 0;
+        const currentLevel = getLevelFromXP(totalXP);
+        const availableBaits = getAvailableBaits(currentLevel);
         
         const container = this.client.container()
             .setAccentColor(parseInt(this.client.color.default.replace('#', ''), 16));
@@ -185,7 +186,8 @@ export default class Bait extends Command {
         }
         
         // Find bait (fuzzy match)
-        const allBaits = getAvailableBaits(getTierFromXP(profile.battlePassXP));
+        const totalXP = profile.totalXP || profile.xp || profile.battlePassXP || 0;
+        const allBaits = getAvailableBaits(getLevelFromXP(totalXP));
         const bait = allBaits.find(b => 
             b.id.includes(baitName) || 
             b.name.toLowerCase().includes(baitName)
@@ -352,7 +354,8 @@ export default class Bait extends Command {
         }
         
         // Find bait
-        const allBaits = getAvailableBaits(getTierFromXP(profile.battlePassXP));
+        const totalXP = profile.totalXP || profile.xp || profile.battlePassXP || 0;
+        const allBaits = getAvailableBaits(getLevelFromXP(totalXP));
         const bait = allBaits.find(b => 
             b.id.includes(baitName) || 
             b.name.toLowerCase().includes(baitName)
@@ -379,7 +382,7 @@ export default class Bait extends Command {
         container.addSeparatorComponents((separator) => separator.setDivider(true));
         
         container.addTextDisplayComponents(
-            (textDisplay) => textDisplay.setContent(`> **Cost:** \`${bait.cost}\` ${emojis.currency.seashell}\n> **Duration:** \`${bait.duration} catches\`\n> **Unlock:** \`Tier ${bait.unlockTier}\``)
+            (textDisplay) => textDisplay.setContent(`> **Cost:** \`${bait.cost}\` ${emojis.currency.seashell}\n> **Duration:** \`${bait.duration} catches\`\n> **Unlock:** \`Level ${bait.unlockTier}\``)
         );
         
         container.addSeparatorComponents((separator) => separator.setDivider(true));

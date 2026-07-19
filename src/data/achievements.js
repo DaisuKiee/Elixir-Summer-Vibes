@@ -1,6 +1,9 @@
 // Achievement System - Track player accomplishments
 // Provides completionist goals and rewards
 
+import { getLevelFromXP } from './levelSystem.js';
+import { awardXP } from '../utils/xpRewards.js';
+
 export const achievementCategories = {
     FISHING: 'fishing',
     EXPLORATION: 'exploration',
@@ -511,7 +514,8 @@ export function checkAchievementProgress(profile, achievement) {
             currentValue = profile.prestigeLevel || 0;
             break;
         case 'tier':
-            currentValue = Math.floor((profile.battlePassXP || 0) / 100);
+            const totalXP = profile.totalXP || profile.xp || profile.battlePassXP || 0;
+            currentValue = getLevelFromXP(totalXP);
             break;
         case 'totalSeashellsEarned':
             currentValue = profile.totalSeashellsEarned || 0;
@@ -538,7 +542,7 @@ export function checkAchievementProgress(profile, achievement) {
  * @param {String} achievementId - Achievement ID
  * @returns {Object} Award result
  */
-export function awardAchievement(profile, achievementId) {
+export async function awardAchievement(profile, achievementId) {
     const achievement = getAchievementById(achievementId);
     if (!achievement) {
         return { success: false, message: 'Achievement not found' };
@@ -569,8 +573,8 @@ export function awardAchievement(profile, achievementId) {
     
     // Award rewards
     if (achievement.rewards.xp) {
-        profile.battlePassXP += achievement.rewards.xp;
-        profile.totalXPEarned += achievement.rewards.xp;
+        // Use awardXP helper for proper level tracking
+        await awardXP(profile, achievement.rewards.xp);
     }
     if (achievement.rewards.seashells) {
         profile.seashells += achievement.rewards.seashells;

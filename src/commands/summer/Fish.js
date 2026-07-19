@@ -1,10 +1,14 @@
+import { AttachmentBuilder, MediaGalleryBuilder, MediaGalleryItemBuilder } from 'discord.js';
 import Command from '../../structures/Command.js';
 import SummerProfile from '../../schemas/summerProfile.js';
 import { fishData, rarityChances, fishingRods, getCurrentWeather, weatherTypes, getAvailableFish } from '../../data/fish.js';
-import { getTierFromXP, xpSources } from '../../data/battlepass.js';
+import { getLevelFromXP, xpSources } from '../../data/levelSystem.js';
 import { updateIslandProgress } from '../../data/beaches.js';
 import { checkEnergyRequirement, consumeEnergy, updateEnergy, formatEnergyDisplay, getTimeUntilFull } from '../../data/energySystem.js';
+import { awardXP } from '../../utils/xpRewards.js';
 import { emojis } from '../../config/emojis.js';
+import { readFileSync, existsSync } from 'fs';
+import { join } from 'path';
 
 // NEW: Phase 1 Systems
 import { 
@@ -15,6 +19,60 @@ import {
     getPityNotification
 } from '../../data/pitySystem.js';
 
+// Retry helper for handling version conflicts during concurrent saves
+async function saveWithRetry(profile, maxRetries = 5) {
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+        try {
+            await profile.save();
+            return; // Success
+        } catch (error) {
+            if (error.name === 'VersionError' && attempt < maxRetries) {
+                console.log(`[Fish] Version conflict on attempt ${attempt}/${maxRetries}, reloading and retrying...`);
+                
+                // Reload fresh profile and re-apply our changes
+                const freshProfile = await SummerProfile.findById(profile._id);
+                if (!freshProfile) {
+                    throw new Error('Profile not found during retry');
+                }
+                
+                // Get the fields we modified
+                const modifiedPaths = error.modifiedPaths || [];
+                const changes = {};
+                
+                // Save our changes
+                modifiedPaths.forEach(path => {
+                    const value = path.split('.').reduce((obj, key) => obj?.[key], profile);
+                    changes[path] = value;
+                });
+                
+                // Apply changes to fresh profile
+                Object.keys(changes).forEach(path => {
+                    const keys = path.split('.');
+                    let target = freshProfile;
+                    
+                    for (let i = 0; i < keys.length - 1; i++) {
+                        target = target[keys[i]];
+                    }
+                    
+                    target[keys[keys.length - 1]] = changes[path];
+                });
+                
+                // Update the profile reference
+                profile = freshProfile;
+                
+                // Exponential backoff with jitter
+                const delay = (100 * Math.pow(2, attempt - 1)) + Math.random() * 100;
+                await new Promise(resolve => setTimeout(resolve, delay));
+            } else {
+                // Log final failure
+                if (error.name === 'VersionError') {
+                    console.error(`[Fish] Failed to save after ${maxRetries} attempts due to version conflicts`);
+                }
+                throw error; // Re-throw if not a version error or out of retries
+            }
+        }
+    }
+}
 import { 
     rollForVariant, 
     getVariantDisplay, 
@@ -58,7 +116,7 @@ export default class Fish extends Command {
             },
             aliases: ['cast', 'fishing'],
             category: 'summer',
-            cooldown: 30, // 30 second cooldown
+            cooldown: 10, // 10 second cooldown
             permissions: {
                 dev: false,
                 client: ['SendMessages', 'ViewChannel'],
@@ -78,6 +136,9 @@ export default class Fish extends Command {
                 username: ctx.author.tag
             });
         }
+        
+        // Update energy to reflect real-time values with equipment bonuses
+        updateEnergy(profile);
         
         // Check if user is developer (unlimited energy)
         const isDeveloper = process.env.OWNER_ID?.split(',').includes(ctx.author.id);
@@ -103,18 +164,18 @@ export default class Fish extends Command {
             const timeInfo = getTimeUntilFull(profile);
             
             container.addTextDisplayComponents(
-                (textDisplay) => textDisplay.setContent('> ## **⚡ Not Enough Energy!**\n> _You need ' + energyCheck.cost + ' energy to go fishing._')
+                (textDisplay) => textDisplay.setContent('> ## **' + emojis.energy.energy + ' Not Enough Energy!**\n> _You need ' + energyCheck.cost + ' energy to go fishing._')
             );
             
             container.addSeparatorComponents((separator) => separator.setDivider(true));
             
             container.addTextDisplayComponents(
-                (textDisplay) => textDisplay.setContent('> ' + energyDisplay.text + '\n> \n> **Cost:** `' + energyCheck.cost + ' energy` 🎣\n> **Needed:** `' + (energyCheck.cost - energyCheck.current) + ' more energy`')
+                (textDisplay) => textDisplay.setContent('> ' + energyDisplay.text + '\n> \n> **Cost:** `' + energyCheck.cost + ' energy` ' + emojis.activities.fishing + '\n> **Needed:** `' + (energyCheck.cost - energyCheck.current) + ' more energy`')
             );
             
             container.addSeparatorComponents((separator) => separator.setDivider(true));
             
-            let regenText = '> **⏰ Energy Regeneration**\n';
+            let regenText = '> **' + emojis.time.clock + ' Energy Regeneration**\n';
             if (timeInfo.isFull) {
                 regenText += '> _Your energy is already full!_';
             } else {
@@ -129,7 +190,7 @@ export default class Fish extends Command {
             container.addSeparatorComponents((separator) => separator.setDivider(true));
             
             container.addTextDisplayComponents(
-                (textDisplay) => textDisplay.setContent('> **💡 Options:**\n> **•** Wait for energy to regenerate\n> **•** Use an energy restoration item (coming soon)\n> **•** Try a lower-cost activity\n> **•** Check `++energy` for more options')
+                (textDisplay) => textDisplay.setContent('> **' + emojis.energy.lightbulb + ' Options:**\n> **•** Wait for energy to regenerate\n> **•** Use an energy restoration item (coming soon)\n> **•** Try a lower-cost activity\n> **•** Check `++energy` for more options')
             );
             
             return ctx.sendMessage({ components: [container] });
@@ -145,25 +206,40 @@ export default class Fish extends Command {
         const currentWeather = getCurrentWeather();
         const weather = weatherTypes[currentWeather];
         
-        // Animation stages
+        // Map weather to folder names
+        const weatherFolderMap = {
+            'sunny': 'day',
+            'cloudy': 'cloudy',
+            'rain': 'rainy',
+            'storm': 'stormy',
+            'night': 'night'
+        };
+        
+        const weatherFolder = weatherFolderMap[currentWeather] || 'day';
+        const weatherPath = join(process.cwd(), 'images', 'weather', weatherFolder);
+        
+        // Animation stages with weather-specific images
         const stages = [
+            {
+                emoji: emojis.activities.fishing,
+                title: 'Ready to Fish...',
+                message: '_You prepare your fishing rod..._',
+                duration: 1000,
+                imageName: 'ready.png'
+            },
             {
                 emoji: '🎣',
                 title: 'Casting Line...',
-                message: '_Your fishing line flies through the air..._',
-                duration: 1000
+                message: `_You cast your line into the ${weather.name.toLowerCase()} waters..._`,
+                duration: 1200,
+                imageName: 'casting.png'
             },
             {
                 emoji: '💦',
                 title: 'Waiting...',
-                message: `_The line sits in the ${weather.name.toLowerCase()} waters..._`,
-                duration: 1200
-            },
-            {
-                emoji: '🐟',
-                title: 'Something\'s Biting!',
-                message: '_You feel a tug on the line!_',
-                duration: 800
+                message: '_Your line sits in the water... Something bites!_',
+                duration: 1500,
+                imageName: 'waiting.png'
             }
         ];
         
@@ -179,12 +255,29 @@ export default class Fish extends Command {
                 (textDisplay) => textDisplay.setContent(`> ## **${stage.emoji} ${stage.title}**\n> ${stage.message}`)
             );
             
+            // Try to add weather-specific image
+            const files = [];
+            const imagePath = join(weatherPath, stage.imageName);
+            
+            if (existsSync(imagePath)) {
+                const imageAttachment = new AttachmentBuilder(imagePath, { name: stage.imageName });
+                files.push(imageAttachment);
+                
+                // Add media gallery to display the animation image
+                container.addMediaGalleryComponents(
+                    new MediaGalleryBuilder().addItems(
+                        new MediaGalleryItemBuilder()
+                            .setURL(`attachment://${stage.imageName}`)
+                    )
+                );
+            }
+            
             if (i === 0) {
                 // First stage - send message
-                message = await ctx.sendMessage({ components: [container] });
+                message = await ctx.sendMessage({ components: [container], files });
             } else {
                 // Subsequent stages - edit message
-                await message.edit({ components: [container] }).catch(() => {});
+                await message.edit({ components: [container], files }).catch(() => {});
             }
             
             // Wait before next stage
@@ -234,6 +327,21 @@ export default class Fish extends Command {
                 baitMessage = `${activeBait.emoji} **${activeBait.name}** is active! (${activeBait.remainingUses} uses left)`;
             }
             
+            // Get equipment bonuses (includes prestige multiplier)
+            const equipmentBonuses = getEquipmentBonuses(profile);
+            
+            // Apply equipment + prestige rare fish bonus
+            // Multiplier > 1.0 means better rare fish chances
+            if (equipmentBonuses.rareFishBonus > 1.0) {
+                const bonus = (equipmentBonuses.rareFishBonus - 1.0) * 15; // Scale the effect
+                modifiedChances.common = Math.max(5, modifiedChances.common - bonus); // Reduce common
+                modifiedChances.uncommon = (modifiedChances.uncommon || 0) + bonus * 0.3;
+                modifiedChances.rare = (modifiedChances.rare || 0) + bonus * 0.25;
+                modifiedChances.epic = (modifiedChances.epic || 0) + bonus * 0.2;
+                modifiedChances.legendary = (modifiedChances.legendary || 0) + bonus * 0.15;
+                modifiedChances.mythical = (modifiedChances.mythical || 0) + bonus * 0.1;
+            }
+            
             rarity = this.determineRarity(weather.multiplier, modifiedChances);
         }
         
@@ -261,8 +369,18 @@ export default class Fish extends Command {
         // Calculate weight
         const weight = (Math.random() * (fish.maxWeight - fish.minWeight) + fish.minWeight).toFixed(2);
         
-        // Apply fishing rod bonus
-        const rodBonus = fishingRods[profile.fishingRodLevel].bonus;
+        // Apply fishing rod bonus - use equipment system if available, fallback to old system
+        const rodLevel = profile.equipment?.rod?.level || profile.fishingRodLevel || 1;
+        let rodBonus = 1.0;
+        
+        if (profile.equipment?.rod?.level) {
+            // Use equipment system bonus
+            const equipmentBonuses = getEquipmentBonuses(profile);
+            rodBonus = equipmentBonuses.valueBonus || 1.0;
+        } else if (fishingRods[rodLevel]) {
+            // Fallback to old fishing rods system
+            rodBonus = fishingRods[rodLevel].bonus;
+        }
         
         // Apply weather multiplier
         const weatherBonus = weather.multiplier;
@@ -311,8 +429,10 @@ export default class Fish extends Command {
         
         // Update profile
         profile.fishCaught += 1;
-        profile.battlePassXP += xpEarned;
-        profile.totalXPEarned += xpEarned;
+        
+        // Award XP using the new system
+        const xpResult = await awardXP(profile, xpEarned);
+        
         profile.seashells += seashellsEarned;
         if (sunTokensEarned > 0) {
             profile.sunTokens += sunTokensEarned;
@@ -401,10 +521,18 @@ export default class Fish extends Command {
             profile.fishInventory = profile.fishInventory.slice(0, 50);
         }
         
-        await profile.save();
+        // Add to permanent collection (for fishdex) if not already caught
+        if (!profile.fishCollection) {
+            profile.fishCollection = [];
+        }
+        if (!profile.fishCollection.includes(fish.name)) {
+            profile.fishCollection.push(fish.name);
+        }
+        
+        await saveWithRetry(profile);
         
         // Get rarity emoji and color
-        const rarityInfo = this.getRarityInfo(rarity);
+        const rarityInfo = this.getRarityInfo(rarity, fish.name);
         
         const container = this.client.container()
             .setAccentColor(parseInt(rarityInfo.color.replace('#', ''), 16));
@@ -427,7 +555,7 @@ export default class Fish extends Command {
         
         // Fishing animation header with weather
         container.addTextDisplayComponents(
-            (textDisplay) => textDisplay.setContent('> ## **🎣 Fishing Success!**\n> _Weather: ' + weather.emoji + ' ' + weather.name + '_\n> _You cast your line and caught..._')
+            (textDisplay) => textDisplay.setContent('> ## **' + emojis.activities.fishing + ' Fishing Success!**\n> _Weather: ' + weather.emoji + ' ' + weather.name + '_\n> _You cast your line and caught..._')
         );
         
         container.addSeparatorComponents((separator) => separator.setDivider(true));
@@ -444,11 +572,21 @@ export default class Fish extends Command {
         const displayName = variantDisplay.name || fish.name;
         const variantPrefix = variant && variant !== 'normal' ? variantDisplay.emoji + ' ' : '';
         
+        // Get rod name from equipment system or fallback to old system
+        let rodName = 'Bamboo Rod';
+        if (profile.equipment?.rod?.level) {
+            const equipmentData = await import('../../data/equipment.js');
+            const rodData = equipmentData.equipmentData.rod[profile.equipment.rod.level];
+            rodName = rodData?.name || 'Bamboo Rod';
+        } else if (fishingRods[rodLevel]) {
+            rodName = fishingRods[rodLevel].name;
+        }
+        
         let fishText = '> # **' + variantPrefix + rarityInfo.emoji + ' ' + displayName + '**\n' +
             '> **Rarity:** ' + rarityInfo.badge + '\n' +
             '> **Weight:** `' + weight + ' kg`\n' +
             '> **Location:** `' + profile.currentBeach + '`\n' +
-            '> **Fishing Rod:** `' + fishingRods[profile.fishingRodLevel].name + '` (×' + rodBonus + ')';
+            '> **Fishing Rod:** `' + rodName + '` (×' + rodBonus.toFixed(2) + ')';
         
         if (weatherBonus > 1.0) {
             fishText += '\n> **Weather Bonus:** `×' + weatherBonus + '`';
@@ -457,7 +595,7 @@ export default class Fish extends Command {
         // Show prestige bonus if active
         if (prestigeBonuses.xpMultiplier > 1.0) {
             const prestigePercent = ((prestigeBonuses.xpMultiplier - 1.0) * 100).toFixed(0);
-            fishText += '\n> **Prestige XP Bonus:** `+' + prestigePercent + '%` ✨';
+            fishText += '\n> **Prestige XP Bonus:** `+' + prestigePercent + '%` ' + emojis.general.sparkles;
         }
         
         // Add mythical description
@@ -470,21 +608,21 @@ export default class Fish extends Command {
         container.addSeparatorComponents((separator) => separator.setDivider(true));
         
         // Rewards (with variant multiplier indicator)
-        let rewardsText = '> **💰 Rewards**\n' +
-            '> **•** XP: `+' + xpEarned + '` 📈';
+        let rewardsText = '> **' + emojis.currency.coin + ' Rewards**\n' +
+            '> **•** XP: `+' + xpEarned + '` ' + emojis.progression.xp;
         
         if (variant && variant !== 'normal') {
             rewardsText += ' ' + variantDisplay.emoji;
         }
         
-        rewardsText += '\n> **•** Seashells: `+' + seashellsEarned + '` 🐚';
+        rewardsText += '\n> **•** Seashells: `+' + seashellsEarned + '` ' + emojis.currency.seashell;
         
         if (variant && variant !== 'normal') {
             rewardsText += ' ' + variantDisplay.emoji;
         }
         
         if (sunTokensEarned > 0) {
-            rewardsText += '\n> **•** Sun Tokens: `+' + sunTokensEarned + '` 🌟 **MYTHICAL!**';
+            rewardsText += '\n> **•** Sun Tokens: `+' + sunTokensEarned + '` ' + emojis.currency.sunToken + ' **MYTHICAL!**';
         }
         
         rewardsText += '\n> **•** Total Fish Caught: `' + profile.fishCaught + '`';
@@ -507,25 +645,25 @@ export default class Fish extends Command {
         
         if (isDeveloper) {
             // Developer mode - show unlimited energy
-            energyText = '> **⚡ Energy**\n' +
-                '> **Used:** `0 energy` 🎣 **[DEV MODE]**\n' +
-                '> **Remaining:** `∞ UNLIMITED` ⭐\n' +
-                '> \n> 💎 **Developer Mode Active** - Unlimited energy!';
+            energyText = '> **' + emojis.energy.energy + ' Energy**\n' +
+                '> **Used:** `0 energy` ' + emojis.activities.fishing + ' **[DEV MODE]**\n' +
+                '> **Remaining:** `∞ UNLIMITED` ' + emojis.general.star + '\n' +
+                '> \n> ' + emojis.currency.diamond + ' **Developer Mode Active** - Unlimited energy!';
         } else {
-            energyText = '> **⚡ Energy**\n' +
-                '> **Used:** `-' + energyResult.cost + ' energy` 🎣\n' +
-                '> **Remaining:** `' + energyResult.remaining + '/100` (' + energyDisplay.percent + '%)\n';
+            energyText = '> **' + emojis.energy.energy + ' Energy**\n' +
+                '> **Used:** `-' + energyResult.cost + ' energy` ' + emojis.activities.fishing + '\n' +
+                '> **Remaining:** `' + energyResult.remaining + '/' + energyDisplay.max + '` (' + energyDisplay.percent + '%)\n';
             
             // Energy warnings
             if (energyResult.remaining < 15) {
-                energyText += '> \n> 🔴 **Low Energy!** Not enough for another fish.';
+                energyText += '> \n> ' + emojis.rarity.legendary + ' **Low Energy!** Not enough for another fish.';
                 const timeInfo = getTimeUntilFull(profile);
                 energyText += '\n> _Full in ' + timeInfo.hours + 'h ' + timeInfo.minutes + 'm_';
             } else if (energyResult.remaining < 30) {
-                energyText += '> \n> 🟡 **Energy running low!** Plan your next activities wisely.';
+                energyText += '> \n> ' + emojis.islandGroups.visayas + ' **Energy running low!** Plan your next activities wisely.';
             } else {
                 const fishesLeft = Math.floor(energyResult.remaining / 15);
-                energyText += '> \n> 🟢 **You can fish ' + fishesLeft + ' more times.**';
+                energyText += '> \n> ' + emojis.rarity.common + ' **You can fish ' + fishesLeft + ' more times.**';
             }
         }
         
@@ -573,10 +711,32 @@ export default class Fish extends Command {
         
         container.addSeparatorComponents((separator) => separator.setDivider(true));
         container.addTextDisplayComponents(
-            (textDisplay) => textDisplay.setContent('_💡 ' + randomFact + '_')
+            (textDisplay) => textDisplay.setContent('_' + emojis.energy.lightbulb + ' ' + randomFact + '_')
         );
         
-        return message.edit({ components: [container] });
+        // Add fish image for Epic, Legendary, and Mythical fish
+        const files = [];
+        if (['epic', 'legendary', 'mythical'].includes(rarity)) {
+            // Convert fish name to match filename format (e.g., "Giant Yellowfin Tuna" -> "Giant-Yellowfin-Tuna.png")
+            const fishFileName = fish.name.replace(/\s+/g, '-') + '.png';
+            // Look for fish images in images/fish/ folder
+            const fishImagePath = join(process.cwd(), 'images', 'fish', fishFileName);
+            
+            if (existsSync(fishImagePath)) {
+                const fishImage = new AttachmentBuilder(fishImagePath, { name: fishFileName });
+                files.push(fishImage);
+                
+                // Add media gallery to display the image
+                container.addMediaGalleryComponents(
+                    new MediaGalleryBuilder().addItems(
+                        new MediaGalleryItemBuilder()
+                            .setURL('attachment://' + fishFileName)
+                    )
+                );
+            }
+        }
+        
+        return message.edit({ components: [container], files });
     }
     
     determineRarity(weatherMultiplier = 1.0, baseChances = rarityChances) {
@@ -605,14 +765,28 @@ export default class Fish extends Command {
         return 'common';
     }
     
-    getRarityInfo(rarity) {
+    getRarityInfo(rarity, fishName = null) {
+        // Get fish-specific emoji if available
+        let fishEmoji = null;
+        if (fishName) {
+            // Convert fish name to emoji key format (e.g., "Yellowfin Tuna" -> "yellowfinTuna")
+            const emojiKey = fishName.replace(/\s+/g, '')
+                .replace(/^./, str => str.toLowerCase())
+                .replace(/-/g, '');
+            
+            // Try to get the specific fish emoji
+            if (emojis.fish[emojiKey]) {
+                fishEmoji = emojis.fish[emojiKey];
+            }
+        }
+        
         const rarityData = {
-            common: { emoji: emojis.fish.fishGeneral, badge: `\`${emojis.rarity.common} Common\``, color: '#57F287' },
-            uncommon: { emoji: emojis.fish.tropicalFish, badge: `\`${emojis.rarity.uncommon} Uncommon\``, color: '#00B4D8' },
-            rare: { emoji: emojis.fish.blowfish, badge: `\`${emojis.rarity.rare} Rare\``, color: '#9B59B6' },
-            epic: { emoji: emojis.fish.shark, badge: `\`${emojis.rarity.epic} Epic\``, color: '#FF6B35' },
-            legendary: { emoji: emojis.fish.whale, badge: `\`${emojis.rarity.legendary} Legendary\``, color: '#FFD700' },
-            mythical: { emoji: emojis.fish.dragon, badge: `\`${emojis.rarity.mythical} Mythical\``, color: '#FF00FF' }
+            common: { emoji: fishEmoji || emojis.fish.fishGeneral, badge: `${emojis.rarity.common} \`Common\``, color: '#57F287' },
+            uncommon: { emoji: fishEmoji || emojis.fish.tropicalFish, badge: `${emojis.rarity.uncommon} \`Uncommon\``, color: '#00B4D8' },
+            rare: { emoji: fishEmoji || emojis.fish.blowfish, badge: `${emojis.rarity.rare} \`Rare\``, color: '#9B59B6' },
+            epic: { emoji: fishEmoji || emojis.fish.shark, badge: `${emojis.rarity.epic} \`Epic\``, color: '#FF6B35' },
+            legendary: { emoji: fishEmoji || emojis.fish.whale, badge: `${emojis.rarity.legendary} \`Legendary\``, color: '#FFD700' },
+            mythical: { emoji: fishEmoji || emojis.fish.dragon, badge: `${emojis.rarity.mythical} \`Mythical\``, color: '#FF00FF' }
         };
         
         return rarityData[rarity] || rarityData.common;

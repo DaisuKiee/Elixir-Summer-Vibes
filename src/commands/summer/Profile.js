@@ -1,6 +1,6 @@
 import Command from '../../structures/Command.js';
 import SummerProfile from '../../schemas/summerProfile.js';
-import { getTierFromXP } from '../../data/battlepass.js';
+import { getLevelFromXP, getRankTitle } from '../../data/levelSystem.js';
 import { getExplorerRank } from '../../data/beaches.js';
 import { createCanvas, loadImage } from 'canvas';
 import { AttachmentBuilder, EmbedBuilder } from 'discord.js';
@@ -38,6 +38,11 @@ export default class Profile extends Command {
     }
     
     async run(ctx, args) {
+        // Show typing indicator immediately for better UX
+        if (ctx.channel && ctx.channel.sendTyping) {
+            await ctx.channel.sendTyping().catch(() => {});
+        }
+        
         const targetUser = ctx.isInteraction && ctx.interaction.options.getUser('user') 
             ? ctx.interaction.options.getUser('user')
             : (ctx.message?.mentions?.users?.first() || ctx.author);
@@ -54,11 +59,13 @@ export default class Profile extends Command {
         }
         
         // Calculate stats
-        const currentTier = getTierFromXP(profile.battlePassXP);
+        const totalXP = profile.totalXP || profile.xp || profile.battlePassXP || 0;
+        const currentLevel = getLevelFromXP(totalXP);
+        const rankTitle = getRankTitle(currentLevel);
         const explorerRank = getExplorerRank(profile.visitedIslands || []);
         
         // Create canvas
-        const canvas = await this.createProfileCanvas(targetUser, profile, currentTier, explorerRank);
+        const canvas = await this.createProfileCanvas(targetUser, profile, currentLevel, rankTitle, explorerRank);
         
         // Convert to attachment
         const attachment = new AttachmentBuilder(canvas.toBuffer(), { 
@@ -67,16 +74,30 @@ export default class Profile extends Command {
         
         // Create embed with the image
         const prestigeBadge = profile.prestigeLevel > 0 ? ' ' + getPrestigeBadge(profile.prestigeLevel) : '';
+        
+        // Build description with prestige progress if applicable
+        let description = '**' + explorerRank.emoji + ' ' + targetUser.username + prestigeBadge + '** - ' + explorerRank.rank + '\n';
+        description += '**Level:** `' + currentLevel + (currentLevel > 100 ? ' ♾️' : '/100') + '` **|** **Rank:** `' + rankTitle + '` **|** **Islands:** `' + (profile.visitedIslands || []).length + '/54`';
+        
+        // Add prestige progress if they have prestiged or are close to prestiging
+        const currentPrestigeLevel = profile.prestigeLevel || 0;
+        if (currentPrestigeLevel < 50) {
+            const nextRequiredLevel = 15 + (currentPrestigeLevel * 10);
+            description += '\n**Next Prestige:** `Level ' + nextRequiredLevel + '` **|** **Rebirth:** `' + currentPrestigeLevel + '/50`';
+        } else {
+            description += '\n**Prestige:** `MAX (50/50)` ' + emojis.general.star;
+        }
+        
         const embed = new EmbedBuilder()
             .setColor(this.client.color.default)
             .setImage('attachment://profile.png')
-            .setDescription('**' + explorerRank.emoji + ' ' + targetUser.username + prestigeBadge + '** - ' + explorerRank.rank + '\n**Tier:** `' + currentTier + (currentTier > 100 ? ' ' + emojis.battlepass.tier : '/100') + '` • **Islands:** `' + (profile.visitedIslands || []).length + '/54`')
+            .setDescription(description)
             .setFooter({ text: emojis.summer.beach + ' Elixir: Summer Escape 2026 - Philippine Islands Adventure' });
         
         return ctx.sendMessage({ embeds: [embed], files: [attachment] });
     }
     
-    async createProfileCanvas(user, profile, currentTier, explorerRank) {
+    async createProfileCanvas(user, profile, currentLevel, rankTitle, explorerRank) {
         // Canvas dimensions matching the background
         const width = 1024;
         const height = 768;
@@ -204,13 +225,13 @@ export default class Profile extends Command {
         // Left column stats
         let currentY = statsStartY;
         
-        // Battle Pass
+        // Player Level
         ctx.fillStyle = '#8B4513';
         ctx.font = 'bold 18px Arial';
-        ctx.fillText(emojis.battlepass.ticket + ' Battle Pass', leftColX, currentY);
+        ctx.fillText('⭐ Player Level', leftColX, currentY);
         ctx.fillStyle = '#2C1810';
         ctx.font = '16px Arial';
-        ctx.fillText('Tier ' + currentTier + (currentTier > 100 ? ' ' + emojis.battlepass.tier : '/100'), leftColX + 5, currentY + 22);
+        ctx.fillText('Lv. ' + currentLevel + (currentLevel > 100 ? ' ♾️' : '/100') + ' - ' + rankTitle, leftColX + 5, currentY + 22);
         currentY += 52;
         
         // Fishing
@@ -219,7 +240,8 @@ export default class Profile extends Command {
         ctx.fillText(emojis.activities.fishing + ' Fishing', leftColX, currentY);
         ctx.fillStyle = '#2C1810';
         ctx.font = '16px Arial';
-        ctx.fillText(profile.fishCaught + ' caught • Rod Lv.' + profile.fishingRodLevel, leftColX + 5, currentY + 22);
+        const rodLevel = profile.equipment?.rod?.level || profile.fishingRodLevel || 1;
+        ctx.fillText(profile.fishCaught + ' caught • Rod Lv.' + rodLevel, leftColX + 5, currentY + 22);
         currentY += 52;
         
         // Islands
@@ -240,7 +262,9 @@ export default class Profile extends Command {
         ctx.fillText(emojis.currency.coin + ' Currency', rightColX, currentY);
         ctx.fillStyle = '#2C1810';
         ctx.font = '16px Arial';
-        ctx.fillText(emojis.currency.seashell + ' ' + profile.seashells.toLocaleString() + ' • ' + emojis.currency.sunToken + ' ' + profile.sunTokens, rightColX + 5, currentY + 22);
+        // Use Unicode seashell for canvas (custom emojis don't render in canvas)
+        const seashellIcon = '🐚';
+        ctx.fillText(seashellIcon + ' ' + profile.seashells.toLocaleString() + ' • ' + emojis.currency.sunToken + ' ' + profile.sunTokens, rightColX + 5, currentY + 22);
         currentY += 52;
         
         // Collectibles
@@ -268,11 +292,13 @@ export default class Profile extends Command {
         const progressBarY = contentY + contentHeight - 48;
         
         // Calculate XP progress
-        const currentTierTotalXP = this.getTotalXPForTier(currentTier);
-        const nextTierTotalXP = this.getTotalXPForTier(currentTier + 1);
-        const xpInCurrentTier = profile.battlePassXP - currentTierTotalXP;
-        const xpNeededForNext = nextTierTotalXP - currentTierTotalXP;
-        const progress = Math.min(xpInCurrentTier / xpNeededForNext, 1);
+        const totalXP = profile.totalXP || profile.xp || profile.battlePassXP || 0;
+        const { getTotalXPForLevel } = await import('../../data/levelSystem.js');
+        const currentLevelTotalXP = getTotalXPForLevel(currentLevel);
+        const nextLevelTotalXP = getTotalXPForLevel(currentLevel + 1);
+        const xpInCurrentLevel = totalXP - currentLevelTotalXP;
+        const xpNeededForNext = nextLevelTotalXP - currentLevelTotalXP;
+        const progress = Math.min(xpInCurrentLevel / xpNeededForNext, 1);
         
         // Progress bar background (wood texture style)
         ctx.fillStyle = 'rgba(101, 67, 33, 0.6)';
@@ -291,7 +317,7 @@ export default class Profile extends Command {
         ctx.textAlign = 'center';
         ctx.shadowColor = 'rgba(0, 0, 0, 0.5)';
         ctx.shadowBlur = 3;
-        const progressText = xpInCurrentTier.toLocaleString() + ' / ' + xpNeededForNext.toLocaleString() + ' XP';
+        const progressText = xpInCurrentLevel.toLocaleString() + ' / ' + xpNeededForNext.toLocaleString() + ' XP';
         ctx.fillText(progressText, progressBarX + progressBarWidth / 2, progressBarY + 19);
         ctx.shadowColor = 'transparent';
         ctx.shadowBlur = 0;

@@ -1,10 +1,26 @@
 import mongoose from 'mongoose';
 
+// Define challenge subdocument schema explicitly
+const challengeSchema = new mongoose.Schema({
+    id: String,
+    description: String,
+    progress: { type: Number, default: 0 },
+    goal: Number,
+    reward: Number,
+    type: String,
+    expiresAt: Date
+}, { _id: false }); // Disable automatic _id for subdocuments
+
 const summerProfileSchema = new mongoose.Schema({
     _id: String, // User ID
     username: String,
     
-    // Battle Pass
+    // Player Leveling System (formerly Battle Pass)
+    level: { type: Number, default: 1 },        // Current player level
+    xp: { type: Number, default: 0 },           // Current XP toward next level
+    totalXP: { type: Number, default: 0 },      // Lifetime XP earned
+    
+    // DEPRECATED: Battle Pass fields (kept for migration safety - remove after 6 months)
     battlePassLevel: { type: Number, default: 1 },
     battlePassXP: { type: Number, default: 0 },
     isPremiumPass: { type: Boolean, default: false },
@@ -19,8 +35,16 @@ const summerProfileSchema = new mongoose.Schema({
         name: String,
         rarity: String,
         weight: Number,
-        caughtAt: Date
+        caughtAt: Date,
+        mutations: [{
+            weatherType: String,
+            mutatedAt: Date,
+            multiplier: Number
+        }],
+        totalMutations: { type: Number, default: 0 },
+        currentValue: { type: Number, default: 0 }
     }],
+    fishCollection: [String], // Permanent list of unique fish names ever caught (for fishdex)
     fishingRodLevel: { type: Number, default: 1 },
     
     // Beach Exploration
@@ -53,27 +77,10 @@ const summerProfileSchema = new mongoose.Schema({
     
     // Achievements & Challenges
     completedChallenges: [String],
-    dailyChallenges: [{
-        id: String,
-        description: String,
-        progress: Number,
-        goal: Number,
-        reward: Number,
-        type: String, // 'fishing', 'exploring', 'collecting', etc.
-        expiresAt: Date
-    }],
-    weeklyChallenges: [{
-        id: String,
-        description: String,
-        progress: Number,
-        goal: Number,
-        reward: Number,
-        type: String, // 'fishing', 'exploring', 'collecting', etc.
-        expiresAt: Date
-    }],
+    dailyChallenges: [challengeSchema],
+    weeklyChallenges: [challengeSchema],
     
     // Stats
-    totalXPEarned: { type: Number, default: 0 },
     daysActive: { type: Number, default: 0 },
     lastDaily: Date,
     createdAt: { type: Date, default: Date.now },
@@ -218,7 +225,8 @@ const summerProfileSchema = new mongoose.Schema({
         rod: { id: String, level: { type: Number, default: 1 } },
         net: { id: String, level: { type: Number, default: 1 } },
         boat: { id: String, level: { type: Number, default: 1 } },
-        accessory: { id: String, level: { type: Number, default: 1 } }
+        accessory: { id: String, level: { type: Number, default: 1 } },
+        energyBar: { id: String, level: { type: Number, default: 1 } }
     },
     
     // Feature #12: Crafting System
@@ -254,6 +262,43 @@ const summerProfileSchema = new mongoose.Schema({
         eventCurrency: { type: Number, default: 0 },
         eventProgress: Number,
         eventRewards: [String] // Claimed reward IDs
+    },
+    
+    // Aquarium System - Display rare fish
+    aquarium: [{
+        fishName: String,
+        rarity: String,
+        weight: Number,
+        caughtAt: Date,
+        displayedAt: { type: Date, default: Date.now },
+        mutations: [{
+            weatherType: String, // 'bloodmoon', 'lightning', etc.
+            mutatedAt: Date,
+            multiplier: Number
+        }],
+        totalMutations: { type: Number, default: 0 },
+        currentValue: { type: Number, default: 0 } // Calculated value after mutations
+    }],
+    aquariumSlots: { type: Number, default: 1 }, // Purchased aquarium slots (starts at 1)
+    
+    // Mutation Items (Crystals/Orbs that guarantee specific mutations)
+    mutationItems: {
+        bloodmoonOrb: { type: Number, default: 0 },
+        lightningCrystal: { type: Number, default: 0 },
+        auroraEssence: { type: Number, default: 0 },
+        frozenShard: { type: Number, default: 0 },
+        stardustVial: { type: Number, default: 0 },
+        goldenEssence: { type: Number, default: 0 },
+        crystalShard: { type: Number, default: 0 },
+        shadowEssence: { type: Number, default: 0 },
+        rainbowPrism: { type: Number, default: 0 }
+    },
+    
+    // Global Mutation Weather
+    currentMutationWeather: {
+        weatherType: String,
+        startedAt: Date,
+        endsAt: Date
     }
 });
 

@@ -20,7 +20,7 @@ export default class Gift extends Command {
         // Get sender's profile
         const senderProfile = await SummerProfile.findById(ctx.author.id);
         if (!senderProfile) {
-            return ctx.sendMessage(`${emojis.general.error} You don't have a summer profile! Use \`!fish\` to start fishing.`);
+            return ctx.sendMessage(`${emojis.general.error} You don't have a summer profile! Use \`${this.client.config.prefix}fish\` to start fishing.`);
         }
 
         // Parse recipient
@@ -59,7 +59,7 @@ export default class Gift extends Command {
         if (!recipientProfile) {
             return ctx.sendMessage(
                 `${emojis.general.error} **${recipientUser.username}** doesn't have a summer profile yet!\n` +
-                `They need to use \`!fish\` to start fishing first.`
+                `They need to use \`${this.client.config.prefix}fish\` to start fishing first.`
             );
         }
 

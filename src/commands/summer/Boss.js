@@ -1,7 +1,8 @@
+import { ButtonBuilder, ButtonStyle, MessageFlags } from 'discord.js';
 import Command from '../../structures/Command.js';
 import SummerProfile from '../../schemas/summerProfile.js';
 import BossSchema from '../../schemas/boss.js';
-import { getTierFromXP } from '../../data/battlepass.js';
+import { getLevelFromXP } from '../../data/levelSystem.js';
 import { updateEnergy, consumeEnergy, formatEnergyDisplay } from '../../data/energySystem.js';
 import {
     calculateBossDamage,
@@ -165,15 +166,16 @@ export default class Boss extends Command {
     }
     
     async attackBoss(ctx, profile, activeBoss) {
-        // Check tier requirement
-        const currentTier = getTierFromXP(profile.battlePassXP);
+        // Check level requirement
+        const totalXP = profile.totalXP || profile.xp || profile.battlePassXP || 0;
+        const currentLevel = getLevelFromXP(totalXP);
         const boss = getBossById(activeBoss.bossId);
         
-        if (currentTier < boss.unlockTier) {
+        if (currentLevel < boss.unlockTier) {
             const container = this.client.container()
                 .setAccentColor(parseInt(this.client.color.error.replace('#', ''), 16));
             container.addTextDisplayComponents(
-                (textDisplay) => textDisplay.setContent(`> **${emojis.general.locked} Boss Locked**\n> _Reach tier ${boss.unlockTier} to fight this boss._\n> _Your tier: ${currentTier}_`)
+                (textDisplay) => textDisplay.setContent(`> **${emojis.general.locked} Boss Locked**\n> _Reach level ${boss.unlockTier} to fight this boss._\n> _Your level: ${currentLevel}_`)
             );
             return ctx.sendMessage({ components: [container] });
         }
@@ -204,6 +206,14 @@ export default class Boss extends Command {
             return ctx.sendMessage({ components: [container] });
         }
         
+        // Award XP for attacking (base 50 XP + bonus for damage dealt)
+        const baseXP = 50;
+        const damageBonus = Math.floor(attackResult.damage / 10); // 1 XP per 10 damage
+        const totalXPGained = baseXP + damageBonus;
+        
+        profile.totalXP = (profile.totalXP || profile.xp || 0) + totalXPGained;
+        profile.xp = profile.totalXP;
+        
         // Consume energy
         consumeEnergy(profile, 'bossAttack', 25);
         await profile.save();
@@ -221,9 +231,9 @@ export default class Boss extends Command {
         
         container.addSeparatorComponents((separator) => separator.setDivider(true));
         
-        // Damage dealt
+        // Damage dealt and XP gained
         container.addTextDisplayComponents(
-            (textDisplay) => textDisplay.setContent(`> **💪 Damage Dealt:** \`${attackResult.damage.toLocaleString()}\`${criticalText}\n> **Your Total:** \`${attackResult.participation.totalDamage.toLocaleString()}\` (${attackResult.participation.attacks} attacks)`)
+            (textDisplay) => textDisplay.setContent(`> **💪 Damage Dealt:** \`${attackResult.damage.toLocaleString()}\`${criticalText}\n> **Your Total:** \`${attackResult.participation.totalDamage.toLocaleString()}\` (${attackResult.participation.attacks} attacks)\n> \n> **📈 XP Gained:** \`+${totalXPGained.toLocaleString()}\` XP`)
         );
         
         container.addSeparatorComponents((separator) => separator.setDivider(true));
@@ -297,12 +307,395 @@ export default class Boss extends Command {
         
         container.addSeparatorComponents((separator) => separator.setDivider(true));
         
-        // Time and commands
+        // Time and energy cost
         container.addTextDisplayComponents(
-            (textDisplay) => textDisplay.setContent(`> **⏰ Time Remaining:** \`${timeLeft}\`\n> **⚡ Energy Cost:** \`25 per attack\`\n> \n> **Commands:**\n> \`++boss attack\` - Deal damage\n> \`++boss leaderboard\` - Full rankings`)
+            (textDisplay) => textDisplay.setContent(`> **⏰ Time Remaining:** \`${timeLeft}\`\n> **⚡ Energy Cost:** \`25 per attack\``)
         );
         
-        return ctx.sendMessage({ components: [container] });
+        // Add Attack and Leaderboard buttons
+        container.addActionRowComponents((row) => {
+            row.addComponents(
+                new ButtonBuilder()
+                    .setCustomId(`boss_attack_${activeBoss._id}`)
+                    .setLabel('Attack Boss')
+                    .setStyle(ButtonStyle.Danger)
+                    .setEmoji('⚔️'),
+                new ButtonBuilder()
+                    .setCustomId(`boss_leaderboard_${activeBoss._id}`)
+                    .setLabel('Leaderboard')
+                    .setStyle(ButtonStyle.Primary)
+                    .setEmoji('🏆')
+            );
+            return row;
+        });
+        
+        const reply = await ctx.sendMessage({ components: [container] });
+        
+        // Handle button interactions
+        const collector = reply.createMessageComponentCollector({
+            filter: i => i.customId.startsWith('boss_'),
+            time: 300000 // 5 minutes
+        });
+        
+        collector.on('collect', async interaction => {
+            try {
+                // Get fresh profile and boss data
+                const userProfile = await SummerProfile.findById(interaction.user.id);
+                const currentBoss = await BossSchema.findById(activeBoss._id);
+                
+                if (!userProfile || !currentBoss) {
+                    return interaction.reply({ content: 'Error: Could not find profile or boss data.', ephemeral: true });
+                }
+                
+                if (interaction.customId === `boss_attack_${activeBoss._id}`) {
+                    // Handle attack with loading animation - edit the original message
+                    await interaction.deferUpdate(); // Acknowledge silently
+                    
+                    // Show attacking animation by editing the original message
+                    await this.showAttackingAnimation(interaction, interaction.message, userProfile, currentBoss);
+                    
+                } else if (interaction.customId.startsWith('boss_attack_again_')) {
+                    // Handle re-attack with cooldown check
+                    await interaction.deferUpdate();
+                    
+                    // Check if enough time has passed (5 seconds)
+                    const lastAttackTime = userProfile.lastBossAttack || 0;
+                    const now = Date.now();
+                    const cooldownMs = 5000; // 5 seconds
+                    const timeSinceLastAttack = now - lastAttackTime;
+                    
+                    if (timeSinceLastAttack < cooldownMs) {
+                        const remaining = Math.ceil((cooldownMs - timeSinceLastAttack) / 1000);
+                        return interaction.followUp({ 
+                            content: `⏳ Please wait ${remaining} more second${remaining > 1 ? 's' : ''} before attacking again!`, 
+                            ephemeral: true 
+                        });
+                    }
+                    
+                    // Update last attack time
+                    userProfile.lastBossAttack = now;
+                    await userProfile.save();
+                    
+                    // Show attacking animation by editing the same message
+                    await this.showAttackingAnimation(interaction, interaction.message, userProfile, currentBoss);
+                    
+                } else if (interaction.customId === `boss_back_${activeBoss._id}`) {
+                    // Go back to boss info - edit the message
+                    await interaction.deferUpdate();
+                    
+                    // Reload fresh boss data
+                    const freshBoss = await BossSchema.findById(activeBoss._id);
+                    const freshProfile = await SummerProfile.findById(interaction.user.id);
+                    
+                    // Update energy
+                    updateEnergy(freshProfile);
+                    
+                    // Build boss info container
+                    await this.updateBossInfoMessage(interaction.message, freshBoss, freshProfile);
+                    
+                } else if (interaction.customId === `boss_leaderboard_${activeBoss._id}`) {
+                    await interaction.deferUpdate();
+                    
+                    // Show leaderboard by editing the message
+                    await this.updateLeaderboardMessage(interaction.message, currentBoss);
+                }
+            } catch (error) {
+                console.error('Boss button interaction error:', error);
+                if (!interaction.replied && !interaction.deferred) {
+                    await interaction.reply({ content: 'An error occurred while processing your request.', ephemeral: true });
+                }
+            }
+        });
+        
+        collector.on('end', () => {
+            // Optionally disable buttons after timeout
+        });
+        
+        return reply;
+    }
+    
+    async showAttackingAnimation(interaction, message, profile, activeBoss) {
+        const boss = getBossById(activeBoss.bossId);
+        
+        // Animation stages
+        const stages = [
+            {
+                emoji: '⚔️',
+                title: 'Preparing Attack...',
+                message: `_You ready your weapon against ${boss.emoji} **${boss.name}**..._`,
+                duration: 800
+            },
+            {
+                emoji: '💥',
+                title: 'Attacking!',
+                message: `_You strike with all your might!_`,
+                duration: 1000
+            },
+            {
+                emoji: '📊',
+                title: 'Calculating Damage...',
+                message: `_Your attack connects!_`,
+                duration: 700
+            }
+        ];
+        
+        // Show each animation stage by editing the message
+        for (let i = 0; i < stages.length; i++) {
+            const stage = stages[i];
+            const container = this.client.container()
+                .setAccentColor(parseInt(this.client.color.default.replace('#', ''), 16));
+            
+            container.addTextDisplayComponents(
+                (textDisplay) => textDisplay.setContent(`> ## **${stage.emoji} ${stage.title}**\n> ${stage.message}`)
+            );
+            
+            const messageData = { components: [container], flags: MessageFlags.IsComponentsV2 };
+            
+            // Edit the existing message
+            await message.edit(messageData).catch(() => {});
+            
+            // Wait before next stage
+            await new Promise(resolve => setTimeout(resolve, stage.duration));
+        }
+        
+        // Now perform the actual attack and update message with results
+        await this.performAttackWithButtons(message, profile, activeBoss, boss);
+    }
+    
+    async performAttackWithButtons(message, profile, activeBoss, boss) {
+        const totalXP = profile.totalXP || profile.xp || profile.battlePassXP || 0;
+        const currentLevel = getLevelFromXP(totalXP);
+        
+        // Check level requirement
+        if (currentLevel < boss.unlockTier) {
+            const container = this.client.container()
+                .setAccentColor(parseInt(this.client.color.error.replace('#', ''), 16));
+            container.addTextDisplayComponents(
+                (textDisplay) => textDisplay.setContent(`> **${emojis.general.locked} Boss Locked**\n> _Reach level ${boss.unlockTier} to fight this boss._\n> _Your level: ${currentLevel}_`)
+            );
+            return message.edit({ components: [container], flags: MessageFlags.IsComponentsV2 });
+        }
+        
+        // Check energy
+        const energyCheck = canAttackBoss(profile);
+        if (!energyCheck.canAttack) {
+            const container = this.client.container()
+                .setAccentColor(parseInt(this.client.color.error.replace('#', ''), 16));
+            container.addTextDisplayComponents(
+                (textDisplay) => textDisplay.setContent(`> **${emojis.energy.energy} Not Enough Energy**\n> ${energyCheck.reason}\n> \n> **Required:** \`${energyCheck.energyCost}\` energy\n> **Current:** \`${energyCheck.currentEnergy}\` energy`)
+            );
+            return message.edit({ components: [container], flags: MessageFlags.IsComponentsV2 });
+        }
+        
+        // Calculate damage
+        const damageResult = calculateBossDamage(profile, boss);
+        
+        // Apply damage to boss
+        const attackResult = attackBoss(activeBoss, profile, damageResult.damage);
+        
+        if (!attackResult.success) {
+            const container = this.client.container()
+                .setAccentColor(parseInt(this.client.color.error.replace('#', ''), 16));
+            container.addTextDisplayComponents(
+                (textDisplay) => textDisplay.setContent(`> **${emojis.general.error} Attack Failed**\n> ${attackResult.message}`)
+            );
+            return message.edit({ components: [container], flags: MessageFlags.IsComponentsV2 });
+        }
+        
+        // Award XP for attacking
+        const baseXP = 50;
+        const damageBonus = Math.floor(attackResult.damage / 10);
+        const totalXPGained = baseXP + damageBonus;
+        
+        profile.totalXP = (profile.totalXP || profile.xp || 0) + totalXPGained;
+        profile.xp = profile.totalXP;
+        
+        // Consume energy
+        consumeEnergy(profile, 'bossAttack', 25);
+        await profile.save();
+        await activeBoss.save();
+        
+        // Build response with buttons
+        const color = damageResult.isCritical ? '#FFD700' : getDifficultyColor(boss.difficulty);
+        const container = this.client.container()
+            .setAccentColor(parseInt(color.replace('#', ''), 16));
+        
+        const criticalText = damageResult.isCritical ? ' **CRITICAL HIT!** 💥' : '';
+        container.addTextDisplayComponents(
+            (textDisplay) => textDisplay.setContent(`> ## **⚔️ Attack Successful!${criticalText}**\n> ${boss.emoji} **${boss.name}**`)
+        );
+        
+        container.addSeparatorComponents((separator) => separator.setDivider(true));
+        
+        // Damage dealt and XP gained
+        container.addTextDisplayComponents(
+            (textDisplay) => textDisplay.setContent(`> **💪 Damage Dealt:** \`${attackResult.damage.toLocaleString()}\`${criticalText}\n> **Your Total:** \`${attackResult.participation.totalDamage.toLocaleString()}\` (${attackResult.participation.attacks} attacks)\n> \n> **📈 XP Gained:** \`+${totalXPGained.toLocaleString()}\` XP`)
+        );
+        
+        container.addSeparatorComponents((separator) => separator.setDivider(true));
+        
+        // Boss HP
+        const hpBar = formatBossHP(attackResult.currentHP, attackResult.maxHP);
+        container.addTextDisplayComponents(
+            (textDisplay) => textDisplay.setContent(`> **❤️ Boss HP:** \`${hpBar.percent}%\`\n> \`${hpBar.bar}\`\n> \`${attackResult.currentHP.toLocaleString()}/${attackResult.maxHP.toLocaleString()}\``)
+        );
+        
+        // Check if defeated
+        if (attackResult.isDefeated) {
+            container.addSeparatorComponents((separator) => separator.setDivider(true));
+            container.addTextDisplayComponents(
+                (textDisplay) => textDisplay.setContent(`> # **🎉 BOSS DEFEATED! 🎉**\n> \n> ${boss.emoji} **${boss.name}** has been vanquished!\n> \n> Use \`++boss rewards\` to claim your loot!`)
+            );
+        } else {
+            // Time remaining
+            const timeLeft = getTimeRemaining(activeBoss.expiresAt);
+            container.addSeparatorComponents((separator) => separator.setDivider(true));
+            container.addTextDisplayComponents(
+                (textDisplay) => textDisplay.setContent(`> **⏰ Time Remaining:** \`${timeLeft}\`\n> **⚡ Energy Used:** \`-25\` (${profile.energy} remaining)`)
+            );
+        }
+        
+        // Add action buttons: Attack Again (5s cooldown) and Back to Boss Info
+        container.addActionRowComponents((row) => {
+            row.addComponents(
+                new ButtonBuilder()
+                    .setCustomId(`boss_attack_again_${activeBoss._id}`)
+                    .setLabel('⚔️ Attack Again')
+                    .setStyle(ButtonStyle.Danger)
+                    .setDisabled(attackResult.isDefeated), // Disable if boss defeated
+                new ButtonBuilder()
+                    .setCustomId(`boss_back_${activeBoss._id}`)
+                    .setLabel('◀️ Back to Boss Info')
+                    .setStyle(ButtonStyle.Secondary)
+            );
+            return row;
+        });
+        
+        return message.edit({ components: [container], flags: MessageFlags.IsComponentsV2 });
+    }
+    
+    async updateBossInfoMessage(message, activeBoss, profile) {
+        const boss = getBossById(activeBoss.bossId);
+        const hpBar = formatBossHP(activeBoss.currentHP, activeBoss.maxHP);
+        const timeLeft = getTimeRemaining(activeBoss.expiresAt);
+        const diffEmoji = getDifficultyEmoji(boss.difficulty);
+        
+        const container = this.client.container()
+            .setAccentColor(parseInt(getDifficultyColor(boss.difficulty).replace('#', ''), 16));
+        
+        // Boss header
+        container.addTextDisplayComponents(
+            (textDisplay) => textDisplay.setContent(`> ## ${boss.emoji} **${boss.name}**\n> _${boss.title}_\n> \n> ${diffEmoji} **${boss.difficulty.toUpperCase()}** Boss`)
+        );
+        
+        container.addSeparatorComponents((separator) => separator.setDivider(true));
+        
+        // Description
+        container.addTextDisplayComponents(
+            (textDisplay) => textDisplay.setContent(`> ${boss.description}`)
+        );
+        
+        container.addSeparatorComponents((separator) => separator.setDivider(true));
+        
+        // HP and stats
+        container.addTextDisplayComponents(
+            (textDisplay) => textDisplay.setContent(`> **❤️ HP:** \`${hpBar.percent}%\` Remaining\n> \`${hpBar.bar}\`\n> \`${activeBoss.currentHP.toLocaleString()}/${activeBoss.maxHP.toLocaleString()}\``)
+        );
+        
+        container.addSeparatorComponents((separator) => separator.setDivider(true));
+        
+        // Participation stats
+        const topParticipants = activeBoss.getTopParticipants(3);
+        let participantText = `> **👥 Participants:** \`${activeBoss.participants.length}\`\n> **Total Attacks:** \`${activeBoss.totalAttacks || activeBoss.participants.reduce((sum, p) => sum + p.attacks, 0)}\`\n> \n> **🏆 Top Contributors:**\n`;
+        
+        topParticipants.forEach((p, index) => {
+            const medal = index === 0 ? '🥇' : index === 1 ? '🥈' : '🥉';
+            participantText += `> ${medal} **${p.username}** - \`${p.totalDamage.toLocaleString()}\` damage\n`;
+        });
+        
+        container.addTextDisplayComponents(
+            (textDisplay) => textDisplay.setContent(participantText)
+        );
+        
+        container.addSeparatorComponents((separator) => separator.setDivider(true));
+        
+        // Time and energy cost
+        container.addTextDisplayComponents(
+            (textDisplay) => textDisplay.setContent(`> **⏰ Time Remaining:** \`${timeLeft}\`\n> **⚡ Energy Cost:** \`25 per attack\``)
+        );
+        
+        // Add Attack and Leaderboard buttons
+        container.addActionRowComponents((row) => {
+            row.addComponents(
+                new ButtonBuilder()
+                    .setCustomId(`boss_attack_${activeBoss._id}`)
+                    .setLabel('Attack Boss')
+                    .setStyle(ButtonStyle.Danger)
+                    .setEmoji('⚔️'),
+                new ButtonBuilder()
+                    .setCustomId(`boss_leaderboard_${activeBoss._id}`)
+                    .setLabel('Leaderboard')
+                    .setStyle(ButtonStyle.Primary)
+                    .setEmoji('🏆')
+            );
+            return row;
+        });
+        
+        return message.edit({ components: [container], flags: MessageFlags.IsComponentsV2 });
+    }
+    
+    async updateLeaderboardMessage(message, activeBoss) {
+        const boss = getBossById(activeBoss.bossId);
+        const topParticipants = activeBoss.getTopParticipants(15);
+        
+        const container = this.client.container()
+            .setAccentColor(parseInt(getDifficultyColor(boss.difficulty).replace('#', ''), 16));
+        
+        container.addTextDisplayComponents(
+            (textDisplay) => textDisplay.setContent(`> ## **🏆 Boss Leaderboard**\n> ${boss.emoji} **${boss.name}**`)
+        );
+        
+        container.addSeparatorComponents((separator) => separator.setDivider(true));
+        
+        let leaderboardText = '';
+        topParticipants.forEach((p, index) => {
+            const rank = index + 1;
+            let rankEmoji;
+            if (rank === 1) rankEmoji = '🥇';
+            else if (rank === 2) rankEmoji = '🥈';
+            else if (rank === 3) rankEmoji = '🥉';
+            else if (rank <= 10) rankEmoji = '⭐';
+            else rankEmoji = '▫️';
+            
+            const damagePercent = ((p.totalDamage / boss.stats.maxHP) * 100).toFixed(2);
+            leaderboardText += `> ${rankEmoji} **#${rank}** ${p.username}\n> \`${p.totalDamage.toLocaleString()}\` damage (${damagePercent}%) • ${p.attacks} attacks\n> \n`;
+        });
+        
+        container.addTextDisplayComponents(
+            (textDisplay) => textDisplay.setContent(leaderboardText || '> _No participants yet_')
+        );
+        
+        if (activeBoss.participants.length > 15) {
+            container.addSeparatorComponents((separator) => separator.setDivider(true));
+            container.addTextDisplayComponents(
+                (textDisplay) => textDisplay.setContent(`> _...and ${activeBoss.participants.length - 15} more fighters!_`)
+            );
+        }
+        
+        container.addSeparatorComponents((separator) => separator.setDivider(true));
+        
+        // Add Back button
+        container.addActionRowComponents((row) => {
+            row.addComponents(
+                new ButtonBuilder()
+                    .setCustomId(`boss_back_${activeBoss._id}`)
+                    .setLabel('◀️ Back to Boss Info')
+                    .setStyle(ButtonStyle.Secondary)
+            );
+            return row;
+        });
+        
+        return message.edit({ components: [container], flags: MessageFlags.IsComponentsV2 });
     }
     
     async showLeaderboard(ctx, activeBoss) {
@@ -461,8 +854,9 @@ export default class Boss extends Command {
         }
         
         // Roll for boss spawn (normal difficulty for testing)
-        const currentTier = getTierFromXP(profile.battlePassXP);
-        const boss = rollBossSpawn(bossDifficulty.NORMAL, currentTier);
+        const totalXP = profile.totalXP || profile.xp || profile.battlePassXP || 0;
+        const currentLevel = getLevelFromXP(totalXP);
+        const boss = rollBossSpawn(bossDifficulty.NORMAL, currentLevel);
         
         if (!boss) {
             const container = this.client.container()
@@ -508,7 +902,7 @@ export default class Boss extends Command {
         
         const timeLeft = getTimeRemaining(bossInstance.expiresAt);
         container.addTextDisplayComponents(
-            (textDisplay) => textDisplay.setContent(`> **❤️ HP:** \`${boss.stats.maxHP.toLocaleString()}\`\n> **⏰ Duration:** \`${timeLeft}\`\n> **⚡ Energy Cost:** \`25 per attack\`\n> **🎯 Required Tier:** \`${boss.unlockTier}\``)
+            (textDisplay) => textDisplay.setContent(`> **❤️ HP:** \`${boss.stats.maxHP.toLocaleString()}\`\n> **⏰ Duration:** \`${timeLeft}\`\n> **⚡ Energy Cost:** \`25 per attack\`\n> **🎯 Required Level:** \`${boss.unlockTier}\``)
         );
         
         container.addSeparatorComponents((separator) => separator.setDivider(true));

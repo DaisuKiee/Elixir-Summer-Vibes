@@ -2,6 +2,7 @@
 // Server-wide cooperative boss battles
 
 import { getBossById } from './bossRoster.js';
+import { getLevelFromXP } from './levelSystem.js';
 
 export const bossStatus = {
     ACTIVE: 'active',
@@ -16,19 +17,20 @@ export const bossStatus = {
  * @returns {Number} Damage dealt
  */
 export function calculateBossDamage(profile, boss) {
-    // Base damage from player tier
-    const playerTier = Math.floor(profile.battlePassXP / 100);
+    // Base damage from player level
+    const totalXP = profile.totalXP || profile.xp || profile.battlePassXP || 0;
+    const playerLevel = getLevelFromXP(totalXP);
     const baseDamage = boss.stats.minDamagePerHit + 
         Math.random() * (boss.stats.maxDamagePerHit - boss.stats.minDamagePerHit);
     
-    // Tier scaling (higher tier = more damage)
-    const tierBonus = 1 + (playerTier * 0.01); // +1% per tier
+    // Level scaling (higher level = more damage)
+    const levelBonus = 1 + (playerLevel * 0.01); // +1% per level
     
     // Prestige bonus
     const prestigeBonus = 1 + ((profile.prestigeLevel || 0) * 0.05); // +5% per prestige
     
     // Fishing rod bonus (better equipment = more damage)
-    const rodLevel = profile.fishingRodLevel || 1;
+    const rodLevel = profile.equipment?.rod?.level || profile.fishingRodLevel || 1;
     const equipmentBonus = 1 + (rodLevel * 0.1); // +10% per rod level
     
     // Random critical hit chance (10%)
@@ -36,7 +38,7 @@ export function calculateBossDamage(profile, boss) {
     const criticalMultiplier = isCritical ? 2.0 : 1.0;
     
     const totalDamage = Math.floor(
-        baseDamage * tierBonus * prestigeBonus * equipmentBonus * criticalMultiplier
+        baseDamage * levelBonus * prestigeBonus * equipmentBonus * criticalMultiplier
     );
     
     return {
@@ -87,10 +89,13 @@ export function attackBoss(bossInstance, profile, damage) {
     const actualDamage = Math.min(damage, bossInstance.currentHP);
     bossInstance.currentHP -= actualDamage;
     
-    // Update participation
+    // Update participation - IMPORTANT: Update the object in the array
     participation.totalDamage += actualDamage;
     participation.attacks += 1;
     participation.lastAttack = new Date();
+    
+    // Mark the participants array as modified so Mongoose saves it
+    bossInstance.markModified('participants');
     
     // Check if boss defeated
     if (bossInstance.currentHP <= 0) {

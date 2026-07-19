@@ -1,6 +1,7 @@
 // Helper functions for awarding battle pass rewards including cosmetics
+// DEPRECATED: Use levelRewards.js instead
 import { getCosmeticsByTier } from '../data/cosmetics.js';
-import { getTier } from '../data/battlepass.js';
+import { getLevel } from '../data/levelSystem.js';
 
 /**
  * Award cosmetics for reaching a specific tier
@@ -101,8 +102,16 @@ function processRewards(rewardsList, profile, rewards) {
                 break;
                 
             case 'fishingRod':
-                if (reward.level > profile.fishingRodLevel) {
+                const currentRodLevel = profile.equipment?.rod?.level || profile.fishingRodLevel || 1;
+                if (reward.level > currentRodLevel) {
+                    // Update new equipment system
+                    if (!profile.equipment) profile.equipment = {};
+                    if (!profile.equipment.rod) profile.equipment.rod = { level: 1 };
+                    profile.equipment.rod.level = reward.level;
+                    
+                    // Also update old field for backward compatibility
                     profile.fishingRodLevel = reward.level;
+                    
                     rewards.other.push({
                         type: 'fishingRod',
                         level: reward.level,

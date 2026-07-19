@@ -78,7 +78,10 @@ export default class Collection extends Command {
         
         // Header
         container.addTextDisplayComponents(
-            (textDisplay) => textDisplay.setContent('> ## **📖 Summer Collection Book**\n> **' + ctx.author.username + '**')
+            (textDisplay) => textDisplay.setContent(
+                `> ## **${emojis.collectibles?.box || '📖'} Summer Collection Book**\n` +
+                `> **${ctx.author.username}**'s treasure collection`
+            )
         );
         
         container.addSeparatorComponents((separator) => separator.setDivider(true));
@@ -93,18 +96,21 @@ export default class Collection extends Command {
         const filled = Math.floor((owned / totalCollectibles) * barLength);
         const progressBar = '▰'.repeat(filled) + '▱'.repeat(barLength - filled);
         
-        const overviewText = '> **📊 Overall Progress**\n' +
-            '> ' + progressBar + '\n' +
-            '> **Collected:** `' + owned + '/' + totalCollectibles + '` (' + percent + '%)\n' +
-            '> **Missing:** `' + (totalCollectibles - owned) + '` items';
+        const overviewText = 
+            `> **${emojis.progression?.stats || '📊'} Overall Progress**\n` +
+            `> ${progressBar}\n` +
+            `> **Collected:** \`${owned}/${totalCollectibles}\` **(${percent}%)**\n` +
+            `> **Missing:** \`${totalCollectibles - owned}\` items\n` +
+            `> \n` +
+            `> ${this.getProgressMessage(percent)}`;
         
         container.addTextDisplayComponents((textDisplay) => textDisplay.setContent(overviewText));
         
         // Category breakdown
         container.addSeparatorComponents((separator) => separator.setDivider(true));
         
-        const categories = ['shells', 'crabs', 'drinks', 'items'];
-        let categoryText = '> **📚 By Category**\n';
+        const categories = ['shells', 'crabs', 'drinks', 'items', 'flowers'];
+        let categoryText = `> **${emojis.collectibles?.box || '📚'} By Category**\n> \n`;
         
         categories.forEach(cat => {
             const catItems = collectiblesData[cat] || [];
@@ -114,7 +120,13 @@ export default class Collection extends Command {
             const emoji = this.getCategoryEmoji(cat);
             const name = cat.charAt(0).toUpperCase() + cat.slice(1);
             
-            categoryText += '> ' + emoji + ' **' + name + ':** `' + catOwned + '/' + catItems.length + '` (' + catPercent + '%)\n';
+            // Progress bar for each category
+            const catBarLength = 10;
+            const catFilled = Math.floor((catOwned / catItems.length) * catBarLength);
+            const catBar = '▰'.repeat(catFilled) + '▱'.repeat(catBarLength - catFilled);
+            
+            categoryText += `> ${emoji} **${name}**\n`;
+            categoryText += `> ${catBar} \`${catOwned}/${catItems.length}\` **(${catPercent}%)**\n`;
         });
         
         container.addTextDisplayComponents((textDisplay) => textDisplay.setContent(categoryText));
@@ -122,8 +134,8 @@ export default class Collection extends Command {
         // Rarity breakdown
         container.addSeparatorComponents((separator) => separator.setDivider(true));
         
-        const rarities = ['common', 'rare', 'epic', 'legendary'];
-        let rarityText = '> **✨ By Rarity**\n';
+        const rarities = ['common', 'uncommon', 'rare', 'epic', 'legendary'];
+        let rarityText = `> **${emojis.general?.sparkles || '✨'} By Rarity**\n> \n`;
         
         rarities.forEach(rarity => {
             const allRarity = this.getAllCollectibles().filter(c => c.rarity === rarity).length;
@@ -133,7 +145,7 @@ export default class Collection extends Command {
             const emoji = this.getRarityEmoji(rarity);
             const name = rarity.charAt(0).toUpperCase() + rarity.slice(1);
             
-            rarityText += '> ' + emoji + ' **' + name + ':** `' + ownedRarity + '/' + allRarity + '` (' + percent + '%)\n';
+            rarityText += `> ${emoji} **${name}:** \`${ownedRarity}/${allRarity}\` **(${percent}%)**\n`;
         });
         
         container.addTextDisplayComponents((textDisplay) => textDisplay.setContent(rarityText));
@@ -146,10 +158,11 @@ export default class Collection extends Command {
                 .sort((a, b) => new Date(b.obtainedAt) - new Date(a.obtainedAt))
                 .slice(0, 5);
             
-            let recentText = '> **🕒 Recently Found**\n';
-            recent.forEach(item => {
+            let recentText = `> **${emojis.time?.clock || '🕒'} Recently Found**\n> \n`;
+            recent.forEach((item, index) => {
                 const emoji = this.getRarityEmoji(item.rarity);
-                recentText += '> ' + emoji + ' `' + item.name + '`\n';
+                const timeAgo = this.getTimeAgo(item.obtainedAt);
+                recentText += `> ${emoji} **${item.name}** - _${timeAgo}_\n`;
             });
             
             container.addTextDisplayComponents((textDisplay) => textDisplay.setContent(recentText));
@@ -158,18 +171,46 @@ export default class Collection extends Command {
         // Footer
         container.addSeparatorComponents((separator) => separator.setDivider(true));
         container.addTextDisplayComponents(
-            (textDisplay) => textDisplay.setContent('_💡 Use `++collection [category]` to view specific collections! Categories: shells, crabs, drinks, items_')
+            (textDisplay) => textDisplay.setContent(
+                `> **${emojis.energy?.lightbulb || '💡'} Tip**\n` +
+                `> Use \`++collection [category]\` to view specific collections!\n` +
+                `> \n` +
+                `> **Available filters:**\n` +
+                `> ${emojis.collectibles?.shell || '🐚'} shells • ${emojis.collectibles?.crab || '🦀'} crabs • ${emojis.collectibles?.cup || '🥤'} drinks\n` +
+                `> ${emojis.general?.gift || '🎁'} items • ${emojis.summer?.hibiscus || '🌺'} flowers\n` +
+                `> \n` +
+                `> Or filter by rarity: common, uncommon, rare, epic, legendary`
+            )
         );
         
         return ctx.sendMessage({ components: [container] });
+    }
+    
+    getProgressMessage(percent) {
+        if (percent === 100) return `${emojis.general?.trophy || '🏆'} **Complete!** Amazing collection!`;
+        if (percent >= 80) return `${emojis.general?.fire || '🔥'} Almost there! Keep going!`;
+        if (percent >= 60) return `${emojis.general?.star || '⭐'} Great progress! More than halfway!`;
+        if (percent >= 40) return `${emojis.general?.sparkles || '✨'} Good work! Keep collecting!`;
+        if (percent >= 20) return `${emojis.activities?.search || '🔍'} Getting started! Keep hunting!`;
+        return `${emojis.general?.new || '🆕'} Just beginning your collection!`;
+    }
+    
+    getTimeAgo(date) {
+        const seconds = Math.floor((new Date() - new Date(date)) / 1000);
+        
+        if (seconds < 60) return 'just now';
+        if (seconds < 3600) return `${Math.floor(seconds / 60)}m ago`;
+        if (seconds < 86400) return `${Math.floor(seconds / 3600)}h ago`;
+        if (seconds < 604800) return `${Math.floor(seconds / 86400)}d ago`;
+        return `${Math.floor(seconds / 604800)}w ago`;
     }
     
     async showFilteredCollection(ctx, profile, filter) {
         const filterLower = filter.toLowerCase();
         
         // Check if filter is a category or rarity
-        const categories = ['shells', 'crabs', 'drinks', 'items'];
-        const rarities = ['common', 'rare', 'epic', 'legendary'];
+        const categories = ['shells', 'crabs', 'drinks', 'items', 'flowers'];
+        const rarities = ['common', 'uncommon', 'rare', 'epic', 'legendary'];
         
         let items = [];
         let title = '';
@@ -185,7 +226,13 @@ export default class Collection extends Command {
                 .setAccentColor(parseInt(this.client.color.error.replace('#', ''), 16));
             
             container.addTextDisplayComponents(
-                (textDisplay) => textDisplay.setContent('> **❌ Invalid Filter**\n> _Valid filters: shells, crabs, drinks, items, common, rare, epic, legendary_')
+                (textDisplay) => textDisplay.setContent(
+                    `> **${emojis.general?.error || '❌'} Invalid Filter**\n` +
+                    `> \n` +
+                    `> Valid filters:\n` +
+                    `> **Categories:** shells, crabs, drinks, items, flowers\n` +
+                    `> **Rarities:** common, uncommon, rare, epic, legendary`
+                )
             );
             
             return ctx.sendMessage({ components: [container] });
@@ -208,7 +255,10 @@ export default class Collection extends Command {
         // Header
         const emoji = categories.includes(filterLower) ? this.getCategoryEmoji(filterLower) : this.getRarityEmoji(filterLower);
         container.addTextDisplayComponents(
-            (textDisplay) => textDisplay.setContent('> ## **' + emoji + ' ' + title + ' Collection**\n> **' + ctx.author.username + '**')
+            (textDisplay) => textDisplay.setContent(
+                `> ## **${emoji} ${title} Collection**\n` +
+                `> **${ctx.author.username}**'s collection`
+            )
         );
         
         container.addSeparatorComponents((separator) => separator.setDivider(true));
@@ -227,8 +277,11 @@ export default class Collection extends Command {
         const filled = Math.floor((owned / items.length) * barLength);
         const progressBar = '▰'.repeat(filled) + '▱'.repeat(barLength - filled);
         
-        const progressText = '> ' + progressBar + '\n' +
-            '> **Collected:** `' + owned + '/' + items.length + '` (' + percent + '%)';
+        const progressText = 
+            `> **${emojis.progression?.chart || '📊'} Progress**\n` +
+            `> ${progressBar}\n` +
+            `> **Collected:** \`${owned}/${items.length}\` **(${percent}%)**\n` +
+            `> **Missing:** \`${items.length - owned}\` items`;
         
         container.addTextDisplayComponents((textDisplay) => textDisplay.setContent(progressText));
         
@@ -238,17 +291,17 @@ export default class Collection extends Command {
         let itemsText = '';
         items.forEach((item, i) => {
             const hasItem = profile.collectibles.find(c => c.id === item.id);
-            const status = hasItem ? '☑️' : '☐';
+            const status = hasItem ? emojis.ui?.checkBox || '☑️' : '☐';
             const rarityEmoji = this.getRarityEmoji(item.rarity);
             
-            itemsText += '> ' + status + ' ' + rarityEmoji + ' **' + item.name + '**';
+            itemsText += `> ${status} ${rarityEmoji} **${item.name}**`;
             if (!hasItem) {
-                itemsText += ' _- Not yet found_';
+                itemsText += ` ${emojis.general?.locked || '🔒'}`;
             }
             itemsText += '\n';
             
-            // Add separator every 12 items
-            if ((i + 1) % 12 === 0 && i < items.length - 1) {
+            // Add separator every 10 items for better readability
+            if ((i + 1) % 10 === 0 && i < items.length - 1) {
                 container.addTextDisplayComponents((textDisplay) => textDisplay.setContent(itemsText));
                 itemsText = '';
             }
@@ -261,7 +314,11 @@ export default class Collection extends Command {
         // Footer
         container.addSeparatorComponents((separator) => separator.setDivider(true));
         container.addTextDisplayComponents(
-            (textDisplay) => textDisplay.setContent('_💡 Find collectibles by fishing and exploring! Use `++collection` to view all categories._')
+            (textDisplay) => textDisplay.setContent(
+                `> **${emojis.energy?.lightbulb || '💡'} Tip**\n` +
+                `> Find collectibles by using \`++beachhunt\` or \`++explore\`!\n` +
+                `> Use \`++collection\` to view all categories.`
+            )
         );
         
         return ctx.sendMessage({ components: [container] });
@@ -277,21 +334,23 @@ export default class Collection extends Command {
     
     getCategoryEmoji(category) {
         const emojiMap = {
-            shells: emojis.collectibles.shell,
-            crabs: emojis.collectibles.crab,
-            drinks: emojis.collectibles.cup,
-            items: emojis.general.gift
+            shells: emojis.collectibles?.shell || '🐚',
+            crabs: emojis.collectibles?.crab || '🦀',
+            drinks: emojis.collectibles?.cup || '🥤',
+            items: emojis.general?.gift || '🎁',
+            flowers: emojis.summer?.hibiscus || '🌺'
         };
-        return emojiMap[category] || emojis.collectibles.box;
+        return emojiMap[category] || emojis.collectibles?.box || '📦';
     }
     
     getRarityEmoji(rarity) {
         const emojiMap = {
-            common: emojis.collectibles.whiteCircle,
-            rare: emojis.collectibles.blueCircle,
-            epic: emojis.collectibles.purpleCircle,
-            legendary: emojis.collectibles.yellowCircle
+            common: emojis.rarity?.common || '⚪',
+            uncommon: emojis.rarity?.uncommon || '🟢',
+            rare: emojis.rarity?.rare || '🔵',
+            epic: emojis.rarity?.epic || '🟣',
+            legendary: emojis.rarity?.legendary || '🟡'
         };
-        return emojiMap[rarity] || emojis.collectibles.whiteCircle;
+        return emojiMap[rarity] || emojis.collectibles?.whiteCircle || '⚪';
     }
 }

@@ -4,6 +4,7 @@ import { beachesData, getAvailableBeaches, getIslandByName, getExplorerRank, has
 import { getAllCollectibles, collectibleRarityChances } from '../../data/collectibles.js';
 import { getRandomEvent, processEventOutcome } from '../../data/explorationEvents.js';
 import { checkEnergyRequirement, consumeEnergy, updateEnergy, formatEnergyDisplay, getTimeUntilFull } from '../../data/energySystem.js';
+import { awardXP } from '../../utils/xpRewards.js';
 import { isChallengeCompleted, isChallengeExpired } from '../../data/challenges.js';
 
 export default class Explore extends Command {
@@ -57,6 +58,9 @@ export default class Explore extends Command {
                 islandDiscoveries: []
             });
         }
+        
+        // Update energy to reflect real-time values with equipment bonuses
+        updateEnergy(profile);
         
         // Initialize visitedIslands if it doesn't exist
         if (!profile.visitedIslands) {
@@ -228,8 +232,10 @@ export default class Explore extends Command {
         profile.beachesExplored += 1;
         profile.currentBeach = island.name;
         profile.lastExploration = now;
-        profile.battlePassXP += xpEarned;
-        profile.totalXPEarned += xpEarned;
+        
+        // Award XP using new system
+        await awardXP(profile, xpEarned);
+        
         profile.seashells += seashellsEarned;
         
         // Update challenge progress - IMPROVED LOGIC
@@ -371,7 +377,7 @@ export default class Explore extends Command {
         const energyDisplay = formatEnergyDisplay(profile);
         let energyText = '> **⚡ Energy**\n' +
             '> **Used:** `-' + energyResult.cost + ' energy` 🗺️\n' +
-            '> **Remaining:** `' + energyResult.remaining + '/100` (' + energyDisplay.percent + '%)\n';
+            '> **Remaining:** `' + energyResult.remaining + '/' + energyDisplay.max + '` (' + energyDisplay.percent + '%)\n';
         
         // Energy warnings
         if (energyResult.remaining < 20) {
@@ -599,8 +605,10 @@ export default class Explore extends Command {
             profile.beachesExplored += 1;
             profile.currentBeach = island.name;
             profile.lastExploration = now;
-            profile.battlePassXP += finalXP;
-            profile.totalXPEarned += finalXP;
+            
+            // Award XP using new system
+            await awardXP(profile, finalXP);
+            
             profile.seashells = Math.max(0, profile.seashells + finalSeashells);
             if (sunTokens > 0) {
                 profile.sunTokens += sunTokens;
@@ -634,7 +642,51 @@ export default class Explore extends Command {
                 });
             }
             
-            await profile.save();
+            // Save with retry on version error
+            let saved = false;
+            let retries = 3;
+            while (!saved && retries > 0) {
+                try {
+                    await profile.save();
+                    saved = true;
+                } catch (error) {
+                    if (error.name === 'VersionError' && retries > 1) {
+                        // Reload the profile and reapply changes
+                        retries--;
+                        const freshProfile = await SummerProfile.findById(profile._id);
+                        if (freshProfile) {
+                            // Reapply the changes to fresh profile
+                            freshProfile.lastEnergyUpdate = profile.lastEnergyUpdate;
+                            freshProfile.energy = profile.energy;
+                            freshProfile.beachesExplored = profile.beachesExplored;
+                            freshProfile.lastExploration = profile.lastExploration;
+                            
+                            // Sync both new and legacy XP fields during migration
+                            freshProfile.xp = profile.xp;
+                            freshProfile.totalXP = profile.totalXP;
+                            freshProfile.level = profile.level;
+                            if (profile.battlePassXP !== undefined) {
+                                freshProfile.battlePassXP = profile.battlePassXP;
+                            }
+                            
+                            freshProfile.seashells = profile.seashells;
+                            freshProfile.islandDiscoveries = profile.islandDiscoveries;
+                            if (foundCollectible && !freshProfile.collectibles.find(c => c.id === foundCollectible.id)) {
+                                freshProfile.collectibles.push({
+                                    id: foundCollectible.id,
+                                    name: foundCollectible.name,
+                                    category: this.getCollectibleCategory(foundCollectible.id),
+                                    rarity: foundCollectible.rarity,
+                                    obtainedAt: now
+                                });
+                            }
+                            profile = freshProfile;
+                        }
+                    } else {
+                        throw error;
+                    }
+                }
+            }
             
             // Show outcome
             const explorerRank = getExplorerRank(profile.visitedIslands);
@@ -686,7 +738,7 @@ export default class Explore extends Command {
             const energyDisplay = formatEnergyDisplay(profile);
             let energyText = '> **⚡ Energy**\n' +
                 '> **Used:** `-' + energyResult.cost + ' energy` 🗺️\n' +
-                '> **Remaining:** `' + energyResult.remaining + '/100` (' + energyDisplay.percent + '%)\n';
+                '> **Remaining:** `' + energyResult.remaining + '/' + energyDisplay.max + '` (' + energyDisplay.percent + '%)\n';
             
             if (energyResult.remaining < 20) {
                 energyText += '> \n> 🔴 **Low Energy!** Rest recommended.';

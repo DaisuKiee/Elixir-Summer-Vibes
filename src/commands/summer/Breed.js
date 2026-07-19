@@ -1,6 +1,6 @@
 import Command from '../../structures/Command.js';
 import SummerProfile from '../../schemas/summerProfile.js';
-import { getTierFromXP } from '../../data/battlepass.js';
+import { getLevelFromXP } from '../../data/levelSystem.js';
 import {
     canBreed,
     startBreeding,
@@ -125,7 +125,8 @@ export default class Breed extends Command {
     
     async showBreedingInfo(ctx, profile) {
         const check = checkBreedingComplete(profile);
-        const currentTier = getTierFromXP(profile.battlePassXP);
+        const totalXP = profile.totalXP || profile.xp || profile.battlePassXP || 0;
+        const currentLevel = getLevelFromXP(totalXP);
         
         const container = this.client.container()
             .setAccentColor(parseInt(this.client.color.default.replace('#', ''), 16));
@@ -167,7 +168,7 @@ export default class Breed extends Command {
             
             // Show requirements
             container.addTextDisplayComponents(
-                (textDisplay) => textDisplay.setContent(`> **📋 Requirements:**\n> **•** Tier 15+ (Your tier: ${currentTier})\n> **•** Two fish in inventory\n> **•** Seashells for breeding cost\n> \n> **Commands:**\n> \`++breed start <fish1> <fish2>\`\n> \`++breed pairs\` - View possible combinations`)
+                (textDisplay) => textDisplay.setContent(`> **📋 Requirements:**\n> **•** Level 15+ (Your level: ${currentLevel})\n> **•** Two fish in inventory\n> **•** Seashells for breeding cost\n> \n> **Commands:**\n> \`++breed start <fish1> <fish2>\`\n> \`++breed pairs\` - View possible combinations`)
             );
         }
         
@@ -384,7 +385,8 @@ export default class Breed extends Command {
     }
     
     async showBreedingPairs(ctx, profile) {
-        const currentTier = getTierFromXP(profile.battlePassXP);
+        const totalXP = profile.totalXP || profile.xp || profile.battlePassXP || 0;
+        const currentLevel = getLevelFromXP(totalXP);
         
         const container = this.client.container()
             .setAccentColor(parseInt(this.client.color.default.replace('#', ''), 16));
@@ -401,12 +403,12 @@ export default class Breed extends Command {
         examplePairs.forEach(pair => {
             const requirement = getBreedingRequirement(pair.rarity);
             const cost = getBreedingCost(pair.rarity);
-            const locked = currentTier < requirement;
+            const locked = currentLevel < requirement;
             
             let pairText = `> ${locked ? emojis.general.locked : pair.emoji} **${pair.offspringName}**\n`;
             pairText += `> ${pair.parents[0]} × ${pair.parents[1]}\n`;
             pairText += `> **Rarity:** \`${pair.rarity}\` • **Rate:** \`${(pair.successRate * 100).toFixed(0)}%\`\n`;
-            pairText += `> **Cost:** \`${cost}\` ${emojis.currency.seashell} • **Tier:** \`${requirement}\``;
+            pairText += `> **Cost:** \`${cost}\` ${emojis.currency.seashell} • **Level:** \`${requirement}\``;
             
             container.addTextDisplayComponents(
                 (textDisplay) => textDisplay.setContent(pairText)

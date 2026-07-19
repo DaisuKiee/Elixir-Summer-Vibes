@@ -1,3 +1,5 @@
+import { getLevelFromXP } from './levelSystem.js';
+
 // 54 Philippine Islands organized by island groups
 // Each island has unique characteristics, rewards, and unlock requirements
 
@@ -736,8 +738,9 @@ export function getIslandByName(name) {
 export function isBeachUnlocked(beach, profile) {
     const req = beach.unlockRequirement;
     
-    // Use battlePassXP to calculate level if battlePassLevel doesn't exist
-    const playerLevel = profile.battlePassLevel || Math.floor(profile.battlePassXP / 100) || 0;
+    // Use getLevelFromXP for accurate level calculation
+    const totalXP = profile.totalXP || profile.xp || profile.battlePassXP || 0;
+    const playerLevel = profile.level || getLevelFromXP(totalXP);
     
     if (playerLevel < req.level) return false;
     if (req.fishCaught && profile.fishCaught < req.fishCaught) return false;

@@ -134,7 +134,7 @@ export default class Equip extends Command {
                 .setAccentColor(parseInt(this.client.color.error.replace('#', ''), 16));
             
             container.addTextDisplayComponents(
-                (textDisplay) => textDisplay.setContent('> **' + emojis.general.locked + ' Cosmetic Locked**\n> You don\'t own **' + cosmetic.name + '**\n\n> _Unlock at Battle Pass Tier ' + cosmetic.unlockTier + '_')
+                (textDisplay) => textDisplay.setContent('> **' + emojis.general.locked + ' Cosmetic Locked**\n> You don\'t own **' + cosmetic.name + '**\n\n> _Unlock at Level ' + cosmetic.unlockTier + '_')
             );
             
             return ctx.sendMessage({ components: [container] });
